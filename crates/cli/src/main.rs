@@ -9,13 +9,17 @@
 //! soroban-forge verify --wasm path/to/contract.wasm
 //! soroban-forge verify --expected <sha256>
 //! soroban-forge verify --manifest provenance-manifest.json
+//! soroban-forge doctor --wasm target/wasm32v1-none/release/contract.wasm
 //! ```
 
 mod cli;
 mod commands;
 
 use clap::{Parser, Subcommand};
-use cli::{BuildArgs, DeployArgs, EventsArgs, InvokeArgs, LintArgs, NewArgs, TestArgs, VerifyArgs};
+use cli::{
+    BuildArgs, DeployArgs, DoctorArgs, EventsArgs, InspectArgs, InvokeArgs, LintArgs, NewArgs,
+    TestArgs, VerifyArgs,
+};
 
 #[derive(Parser, Debug)]
 #[command(
@@ -39,6 +43,8 @@ pub enum Commands {
     Verify(VerifyArgs),
     Invoke(InvokeArgs),
     Events(EventsArgs),
+    Inspect(InspectArgs),
+    Doctor(DoctorArgs),
 }
 
 fn main() -> anyhow::Result<()> {
@@ -54,6 +60,8 @@ fn main() -> anyhow::Result<()> {
         Commands::Verify(args) => commands::verify::run(args)?,
         Commands::Invoke(args) => commands::invoke::run(args)?,
         Commands::Events(args) => commands::events::run(args)?,
+        Commands::Inspect(args) => commands::inspect::run(args)?,
+        Commands::Doctor(args) => commands::doctor::run(args)?,
     }
 
     Ok(())

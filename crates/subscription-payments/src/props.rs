@@ -287,4 +287,95 @@ proptest! {
         prop_assert_eq!(w.client().charge(&id), amount);
         prop_assert_eq!(w.client().get_subscription(&id).last_charged, next_due);
     }
+
+    #[test]
+    fn prop_prepaid_conservation_over_random_lifecycle_interleavings(
+        actions in prop::collection::vec((0u8..6, 1i128..=600), 1..60),
+    ) {
+        let w = setup_world(1_000_000);
+        let id = w.subscribe(100, 10);
+        let client = w.client();
+        let token = soroban_sdk::token::Client::new(&w.env, &w.token);
+        let mut deposits = 1_000_i128;
+        let mut debits = 0_i128;
+        let mut refunds = 0_i128;
+        let mut balance = 1_000_i128;
+        let mut status = SubscriptionStatus::Active;
+        let mut last_charged = START;
+        let mut pause_at = None;
+        let mut failed_attempts = 0_u32;
+        let mut now = START;
+
+        // The first successful deposit opts in; every generated action below
+        // is checked against this independent arithmetic/state mirror.
+        client.deposit(&id, &balance);
+        for (action, amount) in actions {
+            now += 10;
+            w.env.ledger().set_timestamp(now);
+            if status != SubscriptionStatus::Cancelled {
+                match action {
+                    0 => {
+                        client.deposit(&id, &amount);
+                        deposits += amount;
+                        balance += amount;
+                    }
+                    1 if status != SubscriptionStatus::Paused => {
+                        let actual = client.charge(&id);
+                        if balance >= 100 {
+                            prop_assert_eq!(actual, 100);
+                            balance -= 100;
+                            debits += 100;
+                            last_charged += 10;
+                            failed_attempts = 0;
+                            status = SubscriptionStatus::Active;
+                        } else {
+                            prop_assert_eq!(actual, 0);
+                            failed_attempts += 1;
+                            status = if failed_attempts >= MAX_RETRIES {
+                                SubscriptionStatus::Cancelled
+                            } else {
+                                SubscriptionStatus::PastDue
+                            };
+                            if status == SubscriptionStatus::Cancelled {
+                                refunds += balance;
+                                balance = 0;
+                            }
+                        }
+                    }
+                    2 if status == SubscriptionStatus::Active => {
+                        client.pause(&id);
+                        status = SubscriptionStatus::Paused;
+                        pause_at = Some(now);
+                    }
+                    3 if status == SubscriptionStatus::Paused => {
+                        client.resume(&id);
+                        last_charged += now - pause_at.unwrap_or(now);
+                        status = SubscriptionStatus::Active;
+                        pause_at = None;
+                    }
+                    4 if amount <= balance => {
+                        let before = balance;
+                        assert_eq!(client.withdraw_balance(&id, &amount), before - amount);
+                        balance -= amount;
+                        refunds += amount;
+                    }
+                    5 => {
+                        client.cancel(&id);
+                        refunds += balance;
+                        balance = 0;
+                        status = SubscriptionStatus::Cancelled;
+                    }
+                    _ => {}
+                }
+            }
+
+            let sub = client.get_subscription(&id);
+            prop_assert_eq!(sub.prepaid_balance, Some(balance));
+            prop_assert_eq!(sub.status, status.clone());
+            prop_assert_eq!(sub.last_charged, last_charged);
+            prop_assert_eq!(deposits - debits - refunds, balance);
+            prop_assert_eq!(token.balance(&w.contract_id), balance);
+            prop_assert_eq!(token.balance(&w.provider), debits);
+        }
+    }
 }

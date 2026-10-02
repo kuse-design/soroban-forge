@@ -1,0 +1,82 @@
+{
+  "contract": {
+    "id": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M",
+    "name": "soroban-forge-marketplace-royalties"
+  },
+  "description": "Deterministic royalty configuration and sale settlement events from Soroban Forge.",
+  "events": [
+    {
+      "contractId": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M",
+      "eventIndex": 0,
+      "id": "0-0",
+      "inSuccessfulContractCall": true,
+      "ledger": 0,
+      "ledgerClosedAt": "2026-09-23T00:00:00.000Z",
+      "operationIndex": 0,
+      "pagingToken": "0-0",
+      "topic": [
+        "AAAADwAAABJyb3lhbHR5X2NvbmZpZ3VyZWQAAA==",
+        "AAAAEgAAAAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACQ=="
+      ],
+      "transactionHash": "0000000000000000000000000000000000000000000000000000000000000000",
+      "type": "contract",
+      "value": "AAAAEQAAAAEAAAACAAAADwAAAANicHMAAAAAAwAAAfQAAAAPAAAACXJlY2lwaWVudAAAAAAAABIAAAABAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAY="
+    },
+    {
+      "contractId": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M",
+      "eventIndex": 0,
+      "id": "0-0",
+      "inSuccessfulContractCall": true,
+      "ledger": 0,
+      "ledgerClosedAt": "2026-09-23T00:00:00.000Z",
+      "operationIndex": 0,
+      "pagingToken": "0-0",
+      "topic": [
+        "AAAADwAAAAh0cmFuc2Zlcg==",
+        "AAAAEgAAAAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABQ==",
+        "AAAAEgAAAAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABw==",
+        "AAAADgAAADxhYWE6R0FBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUVHV0Y="
+      ],
+      "transactionHash": "0000000000000000000000000000000000000000000000000000000000000000",
+      "type": "contract",
+      "value": "AAAACgAAAAAAAAAAAAAAAAAAA7Y="
+    },
+    {
+      "contractId": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M",
+      "eventIndex": 1,
+      "id": "0-1",
+      "inSuccessfulContractCall": true,
+      "ledger": 1,
+      "ledgerClosedAt": "2026-09-23T00:00:00.000Z",
+      "operationIndex": 0,
+      "pagingToken": "0-1",
+      "topic": [
+        "AAAADwAAAAh0cmFuc2Zlcg==",
+        "AAAAEgAAAAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABQ==",
+        "AAAAEgAAAAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABg==",
+        "AAAADgAAADxhYWE6R0FBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUVHV0Y="
+      ],
+      "transactionHash": "0000000000000000000000000000000000000000000000000000000000000000",
+      "type": "contract",
+      "value": "AAAACgAAAAAAAAAAAAAAAAAAADI="
+    },
+    {
+      "contractId": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M",
+      "eventIndex": 2,
+      "id": "0-2",
+      "inSuccessfulContractCall": true,
+      "ledger": 2,
+      "ledgerClosedAt": "2026-09-23T00:00:00.000Z",
+      "operationIndex": 0,
+      "pagingToken": "0-2",
+      "topic": [
+        "AAAADwAAAAxzYWxlX3NldHRsZWQ=",
+        "AAAAEgAAAAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACQ=="
+      ],
+      "transactionHash": "0000000000000000000000000000000000000000000000000000000000000000",
+      "type": "contract",
+      "value": "AAAAEQAAAAEAAAAHAAAADwAAAAxncm9zc19hbW91bnQAAAAKAAAAAAAAAAAAAAAAAAAD6AAAAA8AAAAFcGF5ZXIAAAAAAAASAAAAAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFAAAADwAAABFyb3lhbHR5X3JlY2lwaWVudAAAAAAAABIAAAABAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAYAAAAPAAAADXJveWFsdHlfc2hhcmUAAAAAAAAKAAAAAAAAAAAAAAAAAAAAMgAAAA8AAAAGc2VsbGVyAAAAAAASAAAAAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHAAAADwAAAApzZWxsZXJfbmV0AAAAAAAKAAAAAAAAAAAAAAAAAAADtgAAAA8AAAAFdG9rZW4AAAAAAAASAAAAAUjxtri8DWD3FA3Um2Eg+68826sq2u6mMTE9nwuulTLx"
+    }
+  ],
+  "schema": 1
+}

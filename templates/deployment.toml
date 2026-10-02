@@ -1,0 +1,33 @@
+# Multi-contract deployment manifest for soroban-forge.
+[manifest]
+version = 1
+
+[deployment]
+network = "testnet"
+source_account = "alice"
+output = "deployment.json"
+
+# Contracts are deployed in the order they appear here, after any dependencies.
+# Use `dependencies` to reference other contract names by their name.
+# Use `init` to pass initialization parameters. Values may be:
+#  - a literal (string, number, boolean)
+#  - { contract = "<name>" } to resolve another contract's deployed address
+#  - { env = "VAR_NAME" } to resolve from an environment variable
+#  - { file = "path/to/file" } to resolve from a file's contents
+
+[[contract]]
+name = "escrow"
+wasm = "target/wasm32v1-none/release/soroban_forge_escrow.wasm"
+init = { token = "CREATED" }
+
+[[contract]]
+name = "vesting"
+wasm = "target/wasm32v1-none/release/soroban_forge_vesting.wasm"
+init = { token = { contract = "escrow" } }
+dependencies = ["escrow"]
+
+[[contract]]
+name = "multisig"
+wasm = "target/wasm32v1-none/release/soroban_forge_multisig.wasm"
+init = { threshold = 2 }
+dependencies = []

@@ -1,6 +1,7 @@
 use super::*;
 use soroban_forge_test_utils::TestAccounts;
-use soroban_sdk::testutils::{Address as _, Ledger as _};
+use soroban_sdk::events::Event as _;
+use soroban_sdk::testutils::{Address as _, Events as _, Ledger as _};
 use soroban_sdk::token::{Client as TokenClient, StellarAssetClient};
 use soroban_sdk::Env;
 
@@ -42,7 +43,14 @@ macro_rules! setup {
 // separate user signature frame.
 
 fn create(client: &SorobanForgeVestingClient<'_>, token: &Address, accounts: &TestAccounts) -> u64 {
-    client.create_schedule(&accounts.user1, token, &TOTAL, &CLIFF, &DURATION)
+    client.create_schedule(
+        &accounts.deployer,
+        &accounts.user1,
+        token,
+        &TOTAL,
+        &CLIFF,
+        &DURATION,
+    )
 }
 
 #[test]
@@ -65,6 +73,7 @@ fn create_schedule_assigns_distinct_ids() {
 fn create_schedule_without_cliff_starts_vesting() {
     let (_env, _token, _tc, _cid, client, accounts) = setup!();
     let id = client.create_schedule(
+        &accounts.deployer,
         &accounts.user1,
         &accounts.validator,
         &TOTAL,
@@ -79,6 +88,7 @@ fn create_schedule_rejects_zero_total() {
     let (_env, _token, _tc, _cid, client, accounts) = setup!();
     let err = client
         .try_create_schedule(
+            &accounts.deployer,
             &accounts.user1,
             &accounts.validator,
             &0_i128,
@@ -94,7 +104,14 @@ fn create_schedule_rejects_zero_total() {
 fn create_schedule_rejects_zero_duration() {
     let (_env, _token, _tc, _cid, client, accounts) = setup!();
     let err = client
-        .try_create_schedule(&accounts.user1, &accounts.validator, &TOTAL, &CLIFF, &0_u64)
+        .try_create_schedule(
+            &accounts.deployer,
+            &accounts.user1,
+            &accounts.validator,
+            &TOTAL,
+            &CLIFF,
+            &0_u64,
+        )
         .unwrap_err()
         .unwrap();
     assert_eq!(err, ForgeError::InvalidInput);
@@ -105,6 +122,7 @@ fn create_schedule_rejects_cliff_after_duration() {
     let (_env, _token, _tc, _cid, client, accounts) = setup!();
     let err = client
         .try_create_schedule(
+            &accounts.deployer,
             &accounts.user1,
             &accounts.validator,
             &TOTAL,
@@ -211,6 +229,7 @@ fn claim_after_end_completes_status() {
 fn claim_without_cliff_vests_from_start() {
     let (env, _token, _tc, _cid, client, accounts) = setup!();
     let id = client.create_schedule(
+        &accounts.deployer,
         &accounts.user1,
         &accounts.validator,
         &TOTAL,
@@ -225,6 +244,7 @@ fn claim_without_cliff_vests_from_start() {
 fn cliff_equals_duration_vests_at_once() {
     let (env, _token, _tc, _cid, client, accounts) = setup!();
     let id = client.create_schedule(
+        &accounts.deployer,
         &accounts.user1,
         &accounts.validator,
         &TOTAL,
@@ -264,6 +284,7 @@ fn claimable_overflow_is_reported() {
     // A huge total with a non-trivial elapsed time overflows the
     // intermediate `total * elapsed` product.
     let id = client.create_schedule(
+        &accounts.deployer,
         &accounts.user1,
         &accounts.validator,
         &i128::MAX,
@@ -346,7 +367,14 @@ fn repeated_claims_settle_token_balances_each_time() {
 fn failed_transfer_leaves_claim_unchanged() {
     let (env, token, tc, contract_id, client, accounts) = setup!();
     // Schedule promises double what the contract actually holds.
-    let id = client.create_schedule(&accounts.user1, &token, &(TOTAL * 2), &0_u64, &DURATION);
+    let id = client.create_schedule(
+        &accounts.deployer,
+        &accounts.user1,
+        &token,
+        &(TOTAL * 2),
+        &0_u64,
+        &DURATION,
+    );
     env.ledger().set_timestamp(START + DURATION + 1);
     assert_eq!(client.claimable(&id), TOTAL * 2);
 
@@ -523,6 +551,7 @@ fn timestamp_u64_max_edge_case() {
 fn total_amount_i128_max_at_duration_succeeds() {
     let (env, _token, _tc, _cid, client, accounts) = setup!();
     let id = client.create_schedule(
+        &accounts.deployer,
         &accounts.user1,
         &accounts.validator,
         &i128::MAX,
@@ -543,6 +572,7 @@ fn start_plus_duration_u64_overflow_reported() {
     let (env, _token, _tc, _cid, client, accounts) = setup!();
     // A schedule whose duration would cause start + duration to overflow u64.
     let id = client.create_schedule(
+        &accounts.deployer,
         &accounts.user1,
         &accounts.validator,
         &TOTAL,
@@ -566,8 +596,543 @@ fn monotonic_id_counter_overflow_reported() {
     });
 
     let err = client
-        .try_create_schedule(&accounts.user1, &token, &TOTAL, &CLIFF, &DURATION)
+        .try_create_schedule(
+            &accounts.deployer,
+            &accounts.user1,
+            &token,
+            &TOTAL,
+            &CLIFF,
+            &DURATION,
+        )
         .unwrap_err()
         .unwrap();
     assert_eq!(err, ForgeError::ArithmeticOverflow);
+}
+
+// ---------------------------------------------------------------------------
+// `get_schedule` record view (issue #125)
+// ---------------------------------------------------------------------------
+
+/// The view returns the complete stored record for an existing id — every
+/// creation parameter round-trips, and the initial state matches what
+/// `claimable`/`get_status` read.
+#[test]
+fn get_schedule_returns_the_full_stored_record() {
+    let (_env, token, _tc, _cid, client, accounts) = setup!();
+    let id = client.create_schedule(
+        &accounts.deployer,
+        &accounts.user1,
+        &token,
+        &TOTAL,
+        &CLIFF,
+        &DURATION,
+    );
+
+    let schedule = client.get_schedule(&id);
+    assert_eq!(schedule.funder, accounts.deployer);
+    assert_eq!(schedule.beneficiary, accounts.user1);
+    assert_eq!(schedule.token, token);
+    assert_eq!(schedule.total_amount, TOTAL);
+    assert_eq!(schedule.start, START);
+    assert_eq!(schedule.cliff, CLIFF);
+    assert_eq!(schedule.duration, DURATION);
+    assert_eq!(schedule.claimed, 0);
+    assert_eq!(schedule.revoked_vested, None);
+    assert_eq!(schedule.status, VestingStatus::Locked);
+    assert_eq!(client.claimable(&id), 0);
+    assert_eq!(client.get_status(&id), VestingStatus::Locked);
+}
+
+#[test]
+fn get_schedule_unknown_id_returns_not_found() {
+    let (_env, _token, _tc, _cid, client, _accounts) = setup!();
+    let err = client.try_get_schedule(&7_u64).unwrap_err().unwrap();
+    assert_eq!(err, ForgeError::NotFound);
+}
+
+/// The two kinds partition one id space: a tranche id is `NotFound` in the
+/// linear view (and vice versa, per `get_tranche_schedule`).
+#[test]
+fn get_schedule_tranche_id_returns_not_found() {
+    let (env, token, _tc, _cid, client, accounts) = setup!();
+    let tranches = soroban_sdk::Vec::from_array(
+        &env,
+        [
+            Tranche {
+                unlock_at: 0,
+                amount: 2_000,
+            },
+            Tranche {
+                unlock_at: 1_000,
+                amount: 8_000,
+            },
+        ],
+    );
+    let id = client.create_tranche_schedule(&accounts.user1, &token, &tranches);
+
+    let err = client.try_get_schedule(&id).unwrap_err().unwrap();
+    assert_eq!(err, ForgeError::NotFound);
+    // The tranche view does return that record.
+    let tranche = client.get_tranche_schedule(&id);
+    assert_eq!(tranche.total_amount, 10_000);
+}
+
+/// `claimed` in the record advances with completed claims: the view and the
+/// claim path read the same storage, and the stored status follows the
+/// settled state.
+#[test]
+fn get_schedule_reflects_claims() {
+    let (env, token, tc, contract_id, client, accounts) = setup!();
+    let id = create(&client, &token, &accounts);
+    assert_eq!(client.get_schedule(&id).claimed, 0);
+
+    // Halfway through the ramp: floor(TOTAL * 2_000 / 3_000) vests.
+    env.ledger().set_timestamp(START + CLIFF + DURATION / 2);
+    let payout = client.claim(&id);
+    assert_eq!(payout, 6_666);
+
+    let schedule = client.get_schedule(&id);
+    assert_eq!(schedule.claimed, 6_666);
+    assert_eq!(schedule.status, VestingStatus::Vesting);
+    assert_eq!(tc.balance(&accounts.user1), 6_666);
+    assert_eq!(tc.balance(&contract_id), TOTAL - 6_666);
+
+    // After the final claim the record is Completed with everything claimed.
+    env.ledger().set_timestamp(START + DURATION);
+    assert_eq!(client.claim(&id), TOTAL - 6_666);
+    let schedule = client.get_schedule(&id);
+    assert_eq!(schedule.claimed, TOTAL);
+    assert_eq!(schedule.status, VestingStatus::Completed);
+}
+
+/// The view is read-only: repeated reads return the same record and the id
+/// counter (the only cross-call state) never moves.
+#[test]
+fn get_schedule_is_read_only() {
+    let (env, token, _tc, contract_id, client, accounts) = setup!();
+    let id = create(&client, &token, &accounts);
+    let before = client.get_schedule(&id);
+    let count_before: u64 = env.as_contract(&contract_id, || {
+        env.storage().instance().get(&DataKey::Count).unwrap_or(0)
+    });
+    assert_eq!(count_before, 1);
+
+    let again = client.get_schedule(&id);
+    assert_eq!(again.claimed, before.claimed);
+    assert_eq!(again.start, before.start);
+    assert_eq!(again.total_amount, before.total_amount);
+
+    let count_after: u64 = env.as_contract(&contract_id, || {
+        env.storage().instance().get(&DataKey::Count).unwrap_or(0)
+    });
+    assert_eq!(count_after, count_before);
+
+    // A read against an empty id leaves nothing behind either.
+    let err = client.try_get_schedule(&99_u64).unwrap_err().unwrap();
+    assert_eq!(err, ForgeError::NotFound);
+    let count_final: u64 = env.as_contract(&contract_id, || {
+        env.storage().instance().get(&DataKey::Count).unwrap_or(0)
+    });
+    assert_eq!(count_final, count_before);
+}
+
+/// No authorization anywhere in the view's path: it succeeds under a blank
+/// envelope, like `claimable` and `get_status`.
+#[test]
+fn get_schedule_requires_no_auth() {
+    let (env, token, _tc, _cid, client, accounts) = setup!();
+    let id = create(&client, &token, &accounts);
+    env.set_auths(&[]);
+    let schedule = client.get_schedule(&id);
+    assert_eq!(schedule.beneficiary, accounts.user1);
+}
+
+// ---------------------------------------------------------------------------
+// Revocation (issue #67): the funder terminates a grant; `Revoked` is real
+// ---------------------------------------------------------------------------
+
+/// Revoking a schedule that has not reached its cliff transitions it to
+/// `Revoked` and freezes nothing: nothing had vested at the revocation
+/// timestamp, so nothing is ever claimable — including after the original
+/// cliff and duration would have passed.
+#[test]
+fn revoke_while_locked_freezes_zero_and_stops_vesting() {
+    let (env, token, tc, contract_id, client, accounts) = setup!();
+    let id = create(&client, &token, &accounts);
+
+    // Still before the cliff: Locked.
+    env.ledger().set_timestamp(START + CLIFF / 2);
+    assert_eq!(client.get_status(&id), VestingStatus::Locked);
+
+    client.revoke(&id);
+
+    // The schedule is Revoked and stays Revoked: no time-derived status.
+    assert_eq!(client.get_status(&id), VestingStatus::Revoked);
+    assert_eq!(client.claimable(&id), 0);
+
+    // Vesting is permanently stopped: the old cliff and duration pass with
+    // nothing accruing and nothing payable.
+    env.ledger().set_timestamp(START + DURATION + 100);
+    assert_eq!(client.get_status(&id), VestingStatus::Revoked);
+    assert_eq!(client.claimable(&id), 0);
+    assert_eq!(client.claim(&id), 0);
+    assert_eq!(tc.balance(&accounts.user1), 0);
+    assert_eq!(tc.balance(&contract_id), TOTAL);
+    assert_eq!(client.get_schedule(&id).revoked_vested, Some(0));
+}
+
+/// Revoking mid-vesting freezes the vested amount at the revocation ledger
+/// timestamp: a partial claim remains possible up to that amount, and
+/// everything past the revocation timestamp never vests.
+#[test]
+fn revoke_mid_vesting_freezes_amount_and_allows_partial_claim() {
+    let (env, token, tc, contract_id, client, accounts) = setup!();
+    let id = create(&client, &token, &accounts);
+
+    // Claim 2_500 before revocation.
+    env.ledger()
+        .set_timestamp(START + CLIFF + (DURATION - CLIFF) / 4);
+    assert_eq!(client.claimable(&id), TOTAL / 4);
+    assert_eq!(client.claim(&id), TOTAL / 4);
+
+    // Halfway through the vesting window: 5_000 of 10_000 vested.
+    env.ledger()
+        .set_timestamp(START + CLIFF + (DURATION - CLIFF) / 2);
+    assert_eq!(client.claimable(&id), TOTAL / 2 - TOTAL / 4);
+
+    client.revoke(&id);
+
+    // The frozen amount survives untouched even long after the schedule
+    // would have fully vested.
+    env.ledger().set_timestamp(START + DURATION + 100);
+    assert_eq!(client.get_status(&id), VestingStatus::Revoked);
+    assert_eq!(client.claimable(&id), TOTAL / 2 - TOTAL / 4);
+
+    // The beneficiary can claim the frozen remainder after revocation.
+    assert_eq!(client.claim(&id), TOTAL / 2 - TOTAL / 4);
+    assert_eq!(client.claimable(&id), 0);
+    assert_eq!(tc.balance(&accounts.user1), TOTAL / 2);
+    assert_eq!(tc.balance(&contract_id), TOTAL - TOTAL / 2);
+
+    // A further claim is a silent no-op: no transfer, no status change.
+    assert_eq!(client.claim(&id), 0);
+    assert_eq!(tc.balance(&accounts.user1), TOTAL / 2);
+    assert_eq!(tc.balance(&contract_id), TOTAL - TOTAL / 2);
+    assert_eq!(client.get_status(&id), VestingStatus::Revoked);
+    assert_eq!(client.get_schedule(&id).claimed, TOTAL / 2);
+}
+
+/// A completed schedule cannot be revoked: the grant ran its course, so
+/// there is nothing left to terminate.
+#[test]
+fn revoke_after_completion_is_rejected() {
+    let (env, token, tc, contract_id, client, accounts) = setup!();
+    let id = create(&client, &token, &accounts);
+
+    env.ledger().set_timestamp(START + DURATION + 1);
+    assert_eq!(client.claim(&id), TOTAL);
+    assert_eq!(client.get_status(&id), VestingStatus::Completed);
+
+    let err = client.try_revoke(&id).unwrap_err().unwrap();
+    assert_eq!(err, ForgeError::InvalidInput);
+
+    // The rejection changed nothing: fully claimed, fully paid out.
+    assert_eq!(client.get_status(&id), VestingStatus::Completed);
+    assert_eq!(client.claimable(&id), 0);
+    assert_eq!(tc.balance(&accounts.user1), TOTAL);
+    assert_eq!(tc.balance(&contract_id), 0);
+}
+
+/// Double revoke is impossible: the second call is rejected and the frozen
+/// record is left exactly as the first revocation wrote it.
+#[test]
+fn double_revoke_is_rejected() {
+    let (env, token, _tc, _cid, client, accounts) = setup!();
+    let id = create(&client, &token, &accounts);
+
+    env.ledger()
+        .set_timestamp(START + CLIFF + (DURATION - CLIFF) / 2);
+    client.revoke(&id);
+    assert_eq!(client.get_status(&id), VestingStatus::Revoked);
+
+    // Advance time first: a second revoke must not re-freeze at a later
+    // (higher) vested amount.
+    env.ledger().set_timestamp(START + DURATION + 100);
+    let err = client.try_revoke(&id).unwrap_err().unwrap();
+    assert_eq!(err, ForgeError::InvalidInput);
+
+    // The frozen amount is still the one from the first revocation.
+    assert_eq!(client.get_schedule(&id).revoked_vested, Some(TOTAL / 2));
+    assert_eq!(client.claimable(&id), TOTAL / 2);
+    assert_eq!(client.get_status(&id), VestingStatus::Revoked);
+}
+
+/// `claimable` before revocation follows the normal ramp; after revocation
+/// it is capped at the frozen amount and drains to `0` as claims land.
+#[test]
+fn claimable_before_and_after_revocation() {
+    let (env, token, _tc, _cid, client, accounts) = setup!();
+    let id = create(&client, &token, &accounts);
+
+    // Before revocation the ramp runs normally.
+    env.ledger().set_timestamp(START + CLIFF);
+    assert_eq!(client.claimable(&id), 0);
+    env.ledger().set_timestamp(START + CLIFF + 1_000);
+    assert_eq!(client.claimable(&id), 3_333);
+
+    // Revoke with 3_333 vested: the cap freezes there.
+    client.revoke(&id);
+    assert_eq!(client.claimable(&id), 3_333);
+
+    // Time advancing cannot raise it past the frozen amount.
+    env.ledger().set_timestamp(START + DURATION + 100);
+    assert_eq!(client.claimable(&id), 3_333);
+
+    // Claims drain it to zero and it stays zero.
+    assert_eq!(client.claim(&id), 3_333);
+    assert_eq!(client.claimable(&id), 0);
+    assert_eq!(client.get_status(&id), VestingStatus::Revoked);
+}
+
+/// Revoking an unknown id is `NotFound`; a tranche id (which occupies the
+/// same id space under a different key) is `NotFound` in `revoke` too.
+#[test]
+fn revoke_unknown_or_tranche_id_is_not_found() {
+    let (env, token, _tc, _cid, client, accounts) = setup!();
+    let err = client.try_revoke(&999).unwrap_err().unwrap();
+    assert_eq!(err, ForgeError::NotFound);
+
+    // A tranche schedule shares the id space but has no revoke path.
+    let tranches = soroban_sdk::Vec::from_array(
+        &env,
+        [
+            Tranche {
+                unlock_at: 0,
+                amount: 2_000,
+            },
+            Tranche {
+                unlock_at: 1_000,
+                amount: 8_000,
+            },
+        ],
+    );
+    let tranche_id = client.create_tranche_schedule(&accounts.user1, &token, &tranches);
+    let err = client.try_revoke(&tranche_id).unwrap_err().unwrap();
+    assert_eq!(err, ForgeError::NotFound);
+}
+
+/// A `funder == beneficiary` grant is rejected at creation: the roles must
+/// be distinct, or `revoke` could be exercised by the beneficiary.
+#[test]
+fn create_schedule_rejects_funder_equal_to_beneficiary() {
+    let (_env, token, _tc, _cid, client, accounts) = setup!();
+    let err = client
+        .try_create_schedule(
+            &accounts.user1,
+            &accounts.user1,
+            &token,
+            &TOTAL,
+            &CLIFF,
+            &DURATION,
+        )
+        .unwrap_err()
+        .unwrap();
+    assert_eq!(err, ForgeError::InvalidInput);
+}
+
+/// Revocation records the funder and the frozen amount on the stored
+/// record: `get_schedule` is the audit view for the state transition.
+#[test]
+fn revoked_record_freezes_vested_amount_and_status() {
+    let (env, token, _tc, _cid, client, accounts) = setup!();
+    let id = create(&client, &token, &accounts);
+
+    // 3_000 through the window: floor(10_000 * 2_000 / 3_000) = 6_666.
+    env.ledger().set_timestamp(START + CLIFF + 2_000);
+    client.revoke(&id);
+
+    let schedule = client.get_schedule(&id);
+    assert_eq!(schedule.funder, accounts.deployer);
+    assert_eq!(schedule.revoked_vested, Some(6_666));
+    assert_eq!(schedule.claimed, 0);
+    assert_eq!(schedule.status, VestingStatus::Revoked);
+    assert_eq!(client.get_status(&id), VestingStatus::Revoked);
+    assert_eq!(client.claimable(&id), 6_666);
+}
+
+#[test]
+fn reassignment_splits_claims_at_the_exact_ledger_boundary() {
+    let (env, token, tc, contract_id, client, accounts) = setup!();
+    let new_beneficiary = Address::generate(&env);
+    let id = create(&client, &token, &accounts);
+
+    env.ledger().set_timestamp(START + CLIFF + 1_000);
+    assert_eq!(client.claim(&id), 3_333);
+
+    let reassignment_time = START + CLIFF + 2_000;
+    env.ledger().set_timestamp(reassignment_time);
+    client.reassign_beneficiary(&id, &new_beneficiary);
+    let emitted_events = env.events().all().filter_by_contract(&contract_id);
+
+    let schedule = client.get_schedule(&id);
+    assert_eq!(schedule.beneficiary, new_beneficiary);
+    assert_eq!(schedule.reassignment_vested, 6_666);
+    assert_eq!(schedule.beneficiary_claimed, 0);
+    assert_eq!(schedule.reassignment_count, 1);
+    assert_eq!(schedule.total_amount, TOTAL);
+    assert_eq!(schedule.start, START);
+    assert_eq!(schedule.cliff, CLIFF);
+    assert_eq!(schedule.duration, DURATION);
+    assert_eq!(client.claimable_for(&id, &accounts.user1), 3_333);
+    assert_eq!(client.claimable(&id), 0);
+    assert_eq!(client.claim(&id), 0);
+
+    // Claiming in the same ledger as reassignment belongs to the old
+    // beneficiary; the new beneficiary begins accruing only after this point.
+    assert_eq!(client.claim_for(&id, &accounts.user1), 3_333);
+    assert_eq!(tc.balance(&accounts.user1), 6_666);
+    assert_eq!(client.claimable_for(&id, &accounts.user1), 0);
+
+    env.ledger().set_timestamp(START + DURATION);
+    assert_eq!(client.claimable(&id), 3_334);
+    assert_eq!(client.claim(&id), 3_334);
+    assert_eq!(tc.balance(&new_beneficiary), 3_334);
+    assert_eq!(tc.balance(&contract_id), 0);
+    assert_eq!(client.get_schedule(&id).claimed, TOTAL);
+    assert_eq!(client.get_status(&id), VestingStatus::Completed);
+    let expected_events = std::vec![
+        events::BeneficiaryReassignedFrom {
+            schedule_id: id,
+            beneficiary: accounts.user1.clone(),
+            new_beneficiary: new_beneficiary.clone(),
+            vested_unclaimed: 3_333,
+            reassignment_count: 1,
+        }
+        .to_xdr(&env, &contract_id),
+        events::BeneficiaryReassignedTo {
+            schedule_id: id,
+            beneficiary: new_beneficiary.clone(),
+            old_beneficiary: accounts.user1.clone(),
+            vested_unclaimed: 3_333,
+            reassignment_count: 1,
+        }
+        .to_xdr(&env, &contract_id),
+    ];
+    assert_eq!(emitted_events.events(), expected_events.as_slice());
+}
+
+#[test]
+fn reassignment_claim_accounting_is_scoped_to_schedule_id() {
+    let (env, token, _tc, _cid, client, accounts) = setup!();
+    let first_id = create(&client, &token, &accounts);
+    let second_id = client.create_schedule(
+        &accounts.deployer,
+        &accounts.user2,
+        &token,
+        &TOTAL,
+        &CLIFF,
+        &DURATION,
+    );
+
+    env.ledger()
+        .set_timestamp(START + CLIFF + (DURATION - CLIFF) / 2);
+    client.reassign_beneficiary(&first_id, &accounts.user2);
+
+    assert_eq!(client.claimable_for(&first_id, &accounts.user1), TOTAL / 2);
+    assert_eq!(client.claimable(&first_id), 0);
+    assert_eq!(client.claimable(&second_id), TOTAL / 2);
+}
+
+#[test]
+fn repeated_reassignments_preserve_each_former_beneficiary_balance() {
+    let (env, token, tc, contract_id, client, accounts) = setup!();
+    let third_beneficiary = Address::generate(&env);
+    let id = create(&client, &token, &accounts);
+
+    env.ledger().set_timestamp(START + CLIFF + 1_500);
+    client.reassign_beneficiary(&id, &accounts.user2);
+    env.ledger().set_timestamp(START + CLIFF + 2_250);
+    client.reassign_beneficiary(&id, &third_beneficiary);
+
+    let schedule = client.get_schedule(&id);
+    assert_eq!(schedule.reassignment_count, 2);
+    assert_eq!(schedule.beneficiary, third_beneficiary);
+    assert_eq!(client.claimable_for(&id, &accounts.user1), 5_000);
+    assert_eq!(client.claimable_for(&id, &accounts.user2), 2_500);
+    assert_eq!(client.claimable(&id), 0);
+
+    env.ledger().set_timestamp(START + DURATION);
+    assert_eq!(client.claim_for(&id, &accounts.user1), 5_000);
+    assert_eq!(client.claim_for(&id, &accounts.user2), 2_500);
+    assert_eq!(client.claim(&id), 2_500);
+    assert_eq!(tc.balance(&accounts.user1), 5_000);
+    assert_eq!(tc.balance(&accounts.user2), 2_500);
+    assert_eq!(tc.balance(&third_beneficiary), 2_500);
+    assert_eq!(tc.balance(&contract_id), 0);
+}
+
+#[test]
+fn reassignment_composes_with_revocation_without_moving_prior_entitlement() {
+    let (env, token, tc, contract_id, client, accounts) = setup!();
+    let new_beneficiary = Address::generate(&env);
+    let id = create(&client, &token, &accounts);
+
+    env.ledger().set_timestamp(START + CLIFF + 1_500);
+    client.reassign_beneficiary(&id, &new_beneficiary);
+
+    env.ledger().set_timestamp(START + CLIFF + 2_250);
+    client.revoke(&id);
+    assert_eq!(client.get_status(&id), VestingStatus::Revoked);
+    assert_eq!(client.claimable_for(&id, &accounts.user1), 5_000);
+    assert_eq!(client.claimable(&id), 2_500);
+
+    let err = client
+        .try_reassign_beneficiary(&id, &accounts.validator)
+        .unwrap_err()
+        .unwrap();
+    assert_eq!(err, ForgeError::InvalidInput);
+
+    env.ledger().set_timestamp(START + DURATION + 100);
+    assert_eq!(client.claim_for(&id, &accounts.user1), 5_000);
+    assert_eq!(client.claim(&id), 2_500);
+    assert_eq!(tc.balance(&accounts.user1), 5_000);
+    assert_eq!(tc.balance(&new_beneficiary), 2_500);
+    assert_eq!(tc.balance(&contract_id), TOTAL - 7_500);
+    assert_eq!(client.get_status(&id), VestingStatus::Revoked);
+}
+
+#[test]
+fn reassignment_rejects_unknown_tranche_and_completed_schedules() {
+    let (env, token, _tc, _cid, client, accounts) = setup!();
+    let err = client
+        .try_reassign_beneficiary(&999, &accounts.user2)
+        .unwrap_err()
+        .unwrap();
+    assert_eq!(err, ForgeError::NotFound);
+
+    let tranche_id = client.create_tranche_schedule(
+        &accounts.user1,
+        &token,
+        &soroban_sdk::vec![
+            &env,
+            Tranche {
+                unlock_at: 0,
+                amount: TOTAL
+            }
+        ],
+    );
+    let err = client
+        .try_reassign_beneficiary(&tranche_id, &accounts.user2)
+        .unwrap_err()
+        .unwrap();
+    assert_eq!(err, ForgeError::NotFound);
+
+    let id = create(&client, &token, &accounts);
+    env.ledger().set_timestamp(START + DURATION);
+    assert_eq!(client.claim(&id), TOTAL);
+    let err = client
+        .try_reassign_beneficiary(&id, &accounts.user2)
+        .unwrap_err()
+        .unwrap();
+    assert_eq!(err, ForgeError::InvalidInput);
 }

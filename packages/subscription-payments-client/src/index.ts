@@ -80,10 +80,33 @@ subscription_id: u64;
 token: string;
 }
 
+
+/**
+ * Read model for a subscription's renewal policy.
+ */
+export interface RenewalPolicy {
+  /**
+ * Ledger through which the token allowance remains valid.
+ */
+allowance_live_until_ledger: u32;
+  completed_renewals: u32;
+  eligible: boolean;
+  enabled: boolean;
+  /**
+ * Zero means unlimited.
+ */
+max_renewals: u32;
+  next_renewal_at: u64;
+}
+
 /**
  * Lifecycle state of a subscription.
  */
 export type SubscriptionStatus = {tag: "Active", values: void} | {tag: "Cancelled", values: void} | {tag: "PastDue", values: void} | {tag: "Paused", values: void};
+
+
+
+
 
 
 /**
@@ -269,13 +292,22 @@ export interface Client {
   pause: ({subscription_id}: {subscription_id: u64}, options?: MethodOptions) => Promise<AssembledTransaction<Result<void>>>
 
   /**
+   * Construct and simulate a renew transaction. Returns an `AssembledTransaction` object which will have a `result` field containing the result of the simulation. If this transaction changes contract state, you will need to call `signAndSend()` on the returned object.
+   * Permissionless keeper path for one pre-authorized period renewal.
+   */
+  renew: ({subscription_id}: {subscription_id: u64}, options?: MethodOptions) => Promise<AssembledTransaction<Result<i128>>>
+
+  /**
    * Construct and simulate a cancel transaction. Returns an `AssembledTransaction` object which will have a `result` field containing the result of the simulation. If this transaction changes contract state, you will need to call `signAndSend()` on the returned object.
-   * Cancel a subscription, preventing further charges.
+   * Cancel a subscription, preventing further charges, and refund any
+   * unused (unearned) time back to the subscriber.
    * 
    * Requires the subscriber. Valid when `Active`, `Paused`, or `PastDue`. Cancelling
-   * an already-cancelled subscription is rejected.
+   * an already-cancelled subscription is rejected. The prorated refund is
+   * computed from the time elapsed since `last_charged` within the current
+   * period and transferred from the contract to the subscriber.
    */
-  cancel: ({subscription_id}: {subscription_id: u64}, options?: MethodOptions) => Promise<AssembledTransaction<Result<void>>>
+  cancel: ({subscription_id}: {subscription_id: u64}, options?: MethodOptions) => Promise<AssembledTransaction<Result<i128>>>
 
   /**
    * Construct and simulate a charge transaction. Returns an `AssembledTransaction` object which will have a `result` field containing the result of the simulation. If this transaction changes contract state, you will need to call `signAndSend()` on the returned object.
@@ -312,6 +344,12 @@ export interface Client {
   subscribe: ({subscriber, provider, token, amount, period}: {subscriber: string, provider: string, token: string, amount: i128, period: u64}, options?: MethodOptions) => Promise<AssembledTransaction<Result<u64>>>
 
   /**
+   * Construct and simulate a charge_catchup transaction. Returns an `AssembledTransaction` object which will have a `result` field containing the result of the simulation. If this transaction changes contract state, you will need to call `signAndSend()` on the returned object.
+   * Atomically bill multiple elapsed periods.
+   */
+  charge_catchup: ({subscription_id, max_periods}: {subscription_id: u64, max_periods: u32}, options?: MethodOptions) => Promise<AssembledTransaction<Result<i128>>>
+
+  /**
    * Construct and simulate a revoke_provider transaction. Returns an `AssembledTransaction` object which will have a `result` field containing the result of the simulation. If this transaction changes contract state, you will need to call `signAndSend()` on the returned object.
    * Withdraw `subscriber`'s explicit authorization of `provider` (see the
    * module docs on provider opt-in).
@@ -336,6 +374,18 @@ export interface Client {
    * already authorized succeeds.
    */
   authorize_provider: ({subscriber, provider}: {subscriber: string, provider: string}, options?: MethodOptions) => Promise<AssembledTransaction<Result<void>>>
+
+  /**
+   * Construct and simulate a get_renewal_policy transaction. Returns an `AssembledTransaction` object which will have a `result` field containing the result of the simulation. If this transaction changes contract state, you will need to call `signAndSend()` on the returned object.
+   * Return the policy and computed renewal window state without mutation.
+   */
+  get_renewal_policy: ({subscription_id}: {subscription_id: u64}, options?: MethodOptions) => Promise<AssembledTransaction<Result<RenewalPolicy>>>
+
+  /**
+   * Construct and simulate a set_renewal_policy transaction. Returns an `AssembledTransaction` object which will have a `result` field containing the result of the simulation. If this transaction changes contract state, you will need to call `signAndSend()` on the returned object.
+   * Enable or update automatic renewals. Only the recorded subscriber can consent.
+   */
+  set_renewal_policy: ({subscription_id, subscriber, enabled, max_renewals}: {subscription_id: u64, subscriber: string, enabled: boolean, max_renewals: u32}, options?: MethodOptions) => Promise<AssembledTransaction<Result<void>>>
 
   /**
    * Construct and simulate a get_subscription_count transaction. Returns an `AssembledTransaction` object which will have a `result` field containing the result of the simulation. If this transaction changes contract state, you will need to call `signAndSend()` on the returned object.
@@ -419,20 +469,29 @@ export class Client extends ContractClient {
   constructor(public readonly options: ContractClientOptions) {
     super(
       new ContractSpec([ "AAAAAQAAAB5BIHJlY3VycmluZyBwYXltZW50IGFncmVlbWVudC4AAAAAAAAAAAAMU3Vic2NyaXB0aW9uAAAACgAAABpBbW91bnQgY2hhcmdlZCBwZXIgcGVyaW9kLgAAAAAABmFtb3VudAAAAAAACwAAAC5OdW1iZXIgb2YgY29uc2VjdXRpdmUgZmFpbGVkIGJpbGxpbmcgYXR0ZW1wdHMuAAAAAAAPZmFpbGVkX2F0dGVtcHRzAAAAAAQAAAAvTGVkZ2VyIHRpbWVzdGFtcCBvZiB0aGUgbGFzdCBzdWNjZXNzZnVsIGNoYXJnZS4AAAAADGxhc3RfY2hhcmdlZAAAAAYAAAAyTGVkZ2VyIHRpbWVzdGFtcCB3aGVuIHBhdXNlZCwgaWYgY3VycmVudGx5IHBhdXNlZC4AAAAAAAlwYXVzZWRfYXQAAAAAAAPoAAAABgAAAClMZW5ndGggb2Ygb25lIGJpbGxpbmcgcGVyaW9kLCBpbiBzZWNvbmRzLgAAAAAAAAZwZXJpb2QAAAAAAAYAAAAbQWNjb3VudCByZWNlaXZpbmcgcGF5bWVudHMuAAAAAAhwcm92aWRlcgAAABMAAAAOQ3VycmVudCBzdGF0ZS4AAAAAAAZzdGF0dXMAAAAAB9AAAAASU3Vic2NyaXB0aW9uU3RhdHVzAAAAAAAWQWNjb3VudCBiZWluZyBjaGFyZ2VkLgAAAAAACnN1YnNjcmliZXIAAAAAABMAAAAnU3RhYmxlIGlkZW50aWZpZXIgYXNzaWduZWQgYXQgY3JlYXRpb24uAAAAAA9zdWJzY3JpcHRpb25faWQAAAAABgAAACNUb2tlbiBjb250cmFjdCB1c2VkIGZvciBzZXR0bGVtZW50LgAAAAAFdG9rZW4AAAAAAAAT",
+        "AAAAAQAAAC9SZWFkIG1vZGVsIGZvciBhIHN1YnNjcmlwdGlvbidzIHJlbmV3YWwgcG9saWN5LgAAAAAAAAAADVJlbmV3YWxQb2xpY3kAAAAAAAAGAAAAN0xlZGdlciB0aHJvdWdoIHdoaWNoIHRoZSB0b2tlbiBhbGxvd2FuY2UgcmVtYWlucyB2YWxpZC4AAAAAG2FsbG93YW5jZV9saXZlX3VudGlsX2xlZGdlcgAAAAAEAAAAAAAAABJjb21wbGV0ZWRfcmVuZXdhbHMAAAAAAAQAAAAAAAAACGVsaWdpYmxlAAAAAQAAAAAAAAAHZW5hYmxlZAAAAAABAAAAFVplcm8gbWVhbnMgdW5saW1pdGVkLgAAAAAAAAxtYXhfcmVuZXdhbHMAAAAEAAAAAAAAAA9uZXh0X3JlbmV3YWxfYXQAAAAABg==",
         "AAAAAgAAACJMaWZlY3ljbGUgc3RhdGUgb2YgYSBzdWJzY3JpcHRpb24uAAAAAAAAAAAAElN1YnNjcmlwdGlvblN0YXR1cwAAAAAABAAAAAAAAAAWQWN0aXZlIGFuZCBjaGFyZ2VhYmxlLgAAAAAABkFjdGl2ZQAAAAAAAAAAAB5DYW5jZWxsZWQ7IG5vIGZ1cnRoZXIgY2hhcmdlcy4AAAAAAAlDYW5jZWxsZWQAAAAAAAAAAAAAMlBheW1lbnQgZmFpbGVkIGFuZCB0aGUgc3Vic2NyaXB0aW9uIGlzIGluIGFycmVhcnMuAAAAAAAHUGFzdER1ZQAAAAAAAAAAOVRlbXBvcmFyaWx5IHBhdXNlZDsgbm8gY2hhcmdlcyBjYW4gYmUgbWFkZSB1bnRpbCByZXN1bWVkLgAAAAAAAAZQYXVzZWQAAA==",
         "AAAAAAAAAHJQYXVzZSBhbiBhY3RpdmUgc3Vic2NyaXB0aW9uLCBwcmV2ZW50aW5nIGNoYXJnZXMgd2hpbGUgcGF1c2VkLgoKUmVxdWlyZXMgdGhlIHN1YnNjcmliZXIuIE9ubHkgdmFsaWQgd2hlbiBgQWN0aXZlYC4AAAAAAAVwYXVzZQAAAAAAAAEAAAAAAAAAD3N1YnNjcmlwdGlvbl9pZAAAAAAGAAAAAQAAA+kAAAACAAAH0AAAAApGb3JnZUVycm9yAAA=",
+        "AAAAAAAAAEFQZXJtaXNzaW9ubGVzcyBrZWVwZXIgcGF0aCBmb3Igb25lIHByZS1hdXRob3JpemVkIHBlcmlvZCByZW5ld2FsLgAAAAAAAAVyZW5ldwAAAAAAAAEAAAAAAAAAD3N1YnNjcmlwdGlvbl9pZAAAAAAGAAAAAQAAA+kAAAALAAAH0AAAAApGb3JnZUVycm9yAAA=",
         "AAAAAAAAALNDYW5jZWwgYSBzdWJzY3JpcHRpb24sIHByZXZlbnRpbmcgZnVydGhlciBjaGFyZ2VzLgoKUmVxdWlyZXMgdGhlIHN1YnNjcmliZXIuIFZhbGlkIHdoZW4gYEFjdGl2ZWAsIGBQYXVzZWRgLCBvciBgUGFzdER1ZWAuIENhbmNlbGxpbmcKYW4gYWxyZWFkeS1jYW5jZWxsZWQgc3Vic2NyaXB0aW9uIGlzIHJlamVjdGVkLgAAAAAGY2FuY2VsAAAAAAABAAAAAAAAAA9zdWJzY3JpcHRpb25faWQAAAAABgAAAAEAAAPpAAAAAgAAB9AAAAAKRm9yZ2VFcnJvcgAA",
         "AAAAAAAAAkpCaWxsIG9uZSBkdWUgcGVyaW9kLgoKUmVxdWlyZXMgdGhlIHByb3ZpZGVyLiBJZiBhIGZ1bGwgcGVyaW9kIGhhcyBub3QgZWxhcHNlZCBzaW5jZSB0aGUgbGFzdApjaGFyZ2UsIHJldHVybnMgYDBgIGFuZCBsZWF2ZXMgdGhlIHN1YnNjcmlwdGlvbiB1bnRvdWNoZWQuIE90aGVyd2lzZQphdHRlbXB0cyB0byB0cmFuc2ZlciBgYW1vdW50YCBvZiBgdG9rZW5gIGZyb20gYHN1YnNjcmliZXJgIHRvIGBwcm92aWRlcmAuCgotIE9uIHN1Y2Nlc3NmdWwgcGF5bWVudDogYWR2YW5jZXMgYGxhc3RfY2hhcmdlZGAgYnkgb25lIHBlcmlvZCwgcmVzZXRzCmBmYWlsZWRfYXR0ZW1wdHNgIHRvIDAsIHRyYW5zaXRpb25zIHN0YXR1cyB0byBgQWN0aXZlYCwgYW5kIHJldHVybnMgYGFtb3VudGAuCi0gT24gZmFpbGVkIHBheW1lbnQ6IGBsYXN0X2NoYXJnZWRgIGlzIE5PVCBhZHZhbmNlZC4gSW5jcmVtZW50cyBgZmFpbGVkX2F0dGVtcHRzYC4KSWYgYGZhaWxlZF9hdHRlbXB0cyA+PSBNQVhfUkVUUklFU2AgKDMpLCBzdGF0dXMgYmVjb21lcyBgQ2FuY2VsbGVkYC4KT3RoZXJ3aXNlIHN0YXR1cyBiZWNvbWVzIGBQYXN0RHVlYC4gUmV0dXJucyBgMGAuAAAAAAAGY2hhcmdlAAAAAAABAAAAAAAAAA9zdWJzY3JpcHRpb25faWQAAAAABgAAAAEAAAPpAAAACwAAB9AAAAAKRm9yZ2VFcnJvcgAA",
         "AAAAAAAAALNSZXN1bWUgYSBwYXVzZWQgc3Vic2NyaXB0aW9uLCBhZHZhbmNpbmcgdGhlIG5leHQgZHVlIGRhdGUgYnkgdGhlCmVsYXBzZWQgcGF1c2VkIGR1cmF0aW9uIHNvIHRoYXQgcGF1c2VkIHBlcmlvZHMgYXJlIG5vdCBiaWxsZWQuCgpSZXF1aXJlcyB0aGUgc3Vic2NyaWJlci4gT25seSB2YWxpZCB3aGVuIGBQYXVzZWRgLgAAAAAGcmVzdW1lAAAAAAABAAAAAAAAAA9zdWJzY3JpcHRpb25faWQAAAAABgAAAAEAAAPpAAAAAgAAB9AAAAAKRm9yZ2VFcnJvcgAA",
         "AAAAAAAAALtDcmVhdGUgYSBuZXcgc3Vic2NyaXB0aW9uIGFuZCByZXR1cm4gaXRzIHN0YWJsZSBpZC4KClJlcXVpcmVzIGBhbW91bnQgPiAwYCBhbmQgYHBlcmlvZCA+IDBgLiBUaGUgc3Vic2NyaWJlciBpcyBhdXRob3JpemVkIGF0CmNyZWF0aW9uIHRpbWU7IGJpbGxpbmcgc3RhcnRzIGZyb20gdGhlIG1vbWVudCBvZiBzdWJzY3JpcHRpb24uAAAAAAlzdWJzY3JpYmUAAAAAAAAFAAAAAAAAAApzdWJzY3JpYmVyAAAAAAATAAAAAAAAAAhwcm92aWRlcgAAABMAAAAAAAAABXRva2VuAAAAAAAAEwAAAAAAAAAGYW1vdW50AAAAAAALAAAAAAAAAAZwZXJpb2QAAAAAAAYAAAABAAAD6QAAAAYAAAfQAAAACkZvcmdlRXJyb3IAAA==",
+        "AAAAAAAAAClBdG9taWNhbGx5IGJpbGwgbXVsdGlwbGUgZWxhcHNlZCBwZXJpb2RzLgAAAAAAAA5jaGFyZ2VfY2F0Y2h1cAAAAAAAAgAAAAAAAAAPc3Vic2NyaXB0aW9uX2lkAAAAAAYAAAAAAAAAC21heF9wZXJpb2RzAAAAAAQAAAABAAAD6QAAAAsAAAfQAAAACkZvcmdlRXJyb3IAAA==",
         "AAAAAAAAAN5XaXRoZHJhdyBgc3Vic2NyaWJlcmAncyBleHBsaWNpdCBhdXRob3JpemF0aW9uIG9mIGBwcm92aWRlcmAgKHNlZSB0aGUKbW9kdWxlIGRvY3Mgb24gcHJvdmlkZXIgb3B0LWluKS4KClJlcXVpcmVzIHRoZSBzdWJzY3JpYmVyLiBJZGVtcG90ZW50OiByZXZva2luZyBhIHByb3ZpZGVyIHRoYXQgaXMgbm90CmF1dGhvcml6ZWQgc3VjY2VlZHMgYW5kIGxlYXZlcyB0aGUgb3B0LWluIGFic2VudC4AAAAAAA9yZXZva2VfcHJvdmlkZXIAAAAAAgAAAAAAAAAKc3Vic2NyaWJlcgAAAAAAEwAAAAAAAAAIcHJvdmlkZXIAAAATAAAAAQAAA+kAAAACAAAH0AAAAApGb3JnZUVycm9yAAA=",
         "AAAAAAAAADJSZWFkIGEgc3RvcmVkIHN1YnNjcmlwdGlvbiBieSBpZCAocmVhZC1vbmx5IHZpZXcpLgAAAAAAEGdldF9zdWJzY3JpcHRpb24AAAABAAAAAAAAAA9zdWJzY3JpcHRpb25faWQAAAAABgAAAAEAAAPpAAAH0AAAAAxTdWJzY3JpcHRpb24AAAfQAAAACkZvcmdlRXJyb3IAAA==",
         "AAAAAAAAANxFeHBsaWNpdGx5IGF1dGhvcml6ZSBgcHJvdmlkZXJgIHRvIGNyZWF0ZSBzdWJzY3JpcHRpb25zIG9uCmBzdWJzY3JpYmVyYCdzIGJlaGFsZiAoc2VlIHRoZSBtb2R1bGUgZG9jcyBvbiBwcm92aWRlciBvcHQtaW4pLgoKUmVxdWlyZXMgdGhlIHN1YnNjcmliZXIuIElkZW1wb3RlbnQ6IGF1dGhvcml6aW5nIGEgcHJvdmlkZXIgdGhhdCBpcwphbHJlYWR5IGF1dGhvcml6ZWQgc3VjY2VlZHMuAAAAEmF1dGhvcml6ZV9wcm92aWRlcgAAAAAAAgAAAAAAAAAKc3Vic2NyaWJlcgAAAAAAEwAAAAAAAAAIcHJvdmlkZXIAAAATAAAAAQAAA+kAAAACAAAH0AAAAApGb3JnZUVycm9yAAA=",
+        "AAAAAAAAAEVSZXR1cm4gdGhlIHBvbGljeSBhbmQgY29tcHV0ZWQgcmVuZXdhbCB3aW5kb3cgc3RhdGUgd2l0aG91dCBtdXRhdGlvbi4AAAAAAAASZ2V0X3JlbmV3YWxfcG9saWN5AAAAAAABAAAAAAAAAA9zdWJzY3JpcHRpb25faWQAAAAABgAAAAEAAAPpAAAH0AAAAA1SZW5ld2FsUG9saWN5AAAAAAAH0AAAAApGb3JnZUVycm9yAAA=",
+        "AAAAAAAAAE5FbmFibGUgb3IgdXBkYXRlIGF1dG9tYXRpYyByZW5ld2Fscy4gT25seSB0aGUgcmVjb3JkZWQgc3Vic2NyaWJlciBjYW4gY29uc2VudC4AAAAAABJzZXRfcmVuZXdhbF9wb2xpY3kAAAAAAAQAAAAAAAAAD3N1YnNjcmlwdGlvbl9pZAAAAAAGAAAAAAAAAApzdWJzY3JpYmVyAAAAAAATAAAAAAAAAAdlbmFibGVkAAAAAAEAAAAAAAAADG1heF9yZW5ld2FscwAAAAQAAAABAAAD6QAAAAIAAAfQAAAACkZvcmdlRXJyb3IAAA==",
         "AAAAAAAAAN1Ub3RhbCBudW1iZXIgb2Ygc3Vic2NyaXB0aW9ucyBjcmVhdGVkIHNvIGZhciAocmVhZC1vbmx5IHZpZXcpLgoKVGhpcyBpcyB0aGUgbW9ub3RvbmljIGlkIGNvdW50ZXIsIHdoaWNoIG9ubHkgYHN1YnNjcmliZWAgYWR2YW5jZXMsIHNvCml0IG5ldmVyIGRlY3JlYXNlcyBhbmQgZXF1YWxzIHRoZSBudW1iZXIgb2YgbGl2ZSBpZHMgcmV0dXJuZWQgYnkgdGhlCmVudW1lcmF0aW9uIHZpZXdzLgAAAAAAABZnZXRfc3Vic2NyaXB0aW9uX2NvdW50AAAAAAAAAAAAAQAAAAY=",
         "AAAAAAAAAGtSZWFkIHdoZXRoZXIgYHN1YnNjcmliZXJgIGhhcyBleHBsaWNpdGx5IGF1dGhvcml6ZWQgYHByb3ZpZGVyYAoocmVhZC1vbmx5IHZpZXc7IHJlcXVpcmVzIG5vIGF1dGhvcml6YXRpb24pLgAAAAAWaXNfcHJvdmlkZXJfYXV0aG9yaXplZAAAAAAAAgAAAAAAAAAKc3Vic2NyaWJlcgAAAAAAEwAAAAAAAAAIcHJvdmlkZXIAAAATAAAAAQAAAAE=",
         "AAAAAAAAAgJTdWJzY3JpYmUgYHN1YnNjcmliZXJgIHRvIGBwcm92aWRlcmAncyBzZXJ2aWNlIG9uIHRoZSBwcm92aWRlcidzCmluaXRpYXRpdmUgKHNlZSB0aGUgbW9kdWxlIGRvY3Mgb24gcHJvdmlkZXIgb3B0LWluKS4KClJlcXVpcmVzIGBhbW91bnQgPiAwYCwgYHBlcmlvZCA+IDBgLCB0aGUgcHJvdmlkZXIncyBhdXRob3JpemF0aW9uLCBhbmQKYW4gZXhwbGljaXQgc3Vic2NyaWJlciBvcHQtaW4gZm9yIHRoZSBwcm92aWRlciAoY2hlY2tlZCBiZWZvcmUgdGhlCnByb3ZpZGVyIGlzIGF1dGhvcml6ZWQsIHNvIGEgbWlzc2luZyBvcHQtaW4gc3VyZmFjZXMgd2l0aG91dCBzcGVuZGluZwp0aGUgcHJvdmlkZXIncyBzaWduYXR1cmUpLiBUaGUgc3Vic2NyaWJlciBpcyAqKm5vdCoqIGF1dGhvcml6ZWQgYXQKY3JlYXRpb24uIFRoZSByZWNvcmQgaXMgY3JlYXRlZCB0aHJvdWdoIHRoZSBzYW1lIGludGVybmFsIHBhdGggYXMKW2BzdWJzY3JpYmVgXSwgc2hhcmluZyB0aGUgc2FtZSBzZXF1ZW50aWFsIGlkIGNvdW50ZXIuAAAAAAAWc3Vic2NyaWJlX29uX2JlaGFsZl9vZgAAAAAABQAAAAAAAAAIcHJvdmlkZXIAAAATAAAAAAAAAApzdWJzY3JpYmVyAAAAAAATAAAAAAAAAAV0b2tlbgAAAAAAABMAAAAAAAAABmFtb3VudAAAAAAACwAAAAAAAAAGcGVyaW9kAAAAAAAGAAAAAQAAA+kAAAAGAAAH0AAAAApGb3JnZUVycm9yAAA=",
         "AAAAAAAAAZBMaXN0IGBwcm92aWRlcmAncyBzdWJzY3JpcHRpb25zIGluIGNyZWF0aW9uIG9yZGVyLCBvbmUgcGFnZSBhdCBhIHRpbWUKKHJlYWQtb25seSB2aWV3KS4KClJlcXVpcmVzIG5vIGF1dGhvcml6YXRpb24gYW5kIG5ldmVyIG11dGF0ZXMgc3RvcmFnZS4gQW4gYWRkcmVzcyB3aXRoCm5vIHN1YnNjcmlwdGlvbnMg4oCUIG9yIGFuIG9mZnNldCBhdCBvciBwYXN0IHRoZSBlbmQgb2YgaXRzIGxpc3Qg4oCUCnJldHVybnMgYW4gZW1wdHkgYFZlY2AsIG5vdCBhbiBlcnJvciwgc28gY2xpZW50cyBjYW4gYmFjayAibXkKc3Vic2NyaWJlcnMiIHZpZXdzIHdpdGhvdXQgYW4gb2ZmLWNoYWluIGluZGV4ZXIuCgojIEVycm9ycwoKKiBbYEZvcmdlRXJyb3I6OkludmFsaWRJbnB1dGBdIOKAlCBgbGltaXRgIGlzIHplcm8uAAAAGnN1YnNjcmlwdGlvbnNfZm9yX3Byb3ZpZGVyAAAAAAADAAAAAAAAAAhwcm92aWRlcgAAABMAAAAAAAAABm9mZnNldAAAAAAABAAAAAAAAAAFbGltaXQAAAAAAAAEAAAAAQAAA+kAAAPqAAAH0AAAAAxTdWJzY3JpcHRpb24AAAfQAAAACkZvcmdlRXJyb3IAAA==",
         "AAAAAAAAAZRMaXN0IGBzdWJzY3JpYmVyYCdzIHN1YnNjcmlwdGlvbnMgaW4gY3JlYXRpb24gb3JkZXIsIG9uZSBwYWdlIGF0IGEKdGltZSAocmVhZC1vbmx5IHZpZXcpLgoKUmVxdWlyZXMgbm8gYXV0aG9yaXphdGlvbiBhbmQgbmV2ZXIgbXV0YXRlcyBzdG9yYWdlLiBBbiBhZGRyZXNzIHdpdGgKbm8gc3Vic2NyaXB0aW9ucyDigJQgb3IgYW4gb2Zmc2V0IGF0IG9yIHBhc3QgdGhlIGVuZCBvZiBpdHMgbGlzdCDigJQKcmV0dXJucyBhbiBlbXB0eSBgVmVjYCwgbm90IGFuIGVycm9yLCBzbyBjbGllbnRzIGNhbiBiYWNrICJteQpzdWJzY3JpcHRpb25zIiB2aWV3cyB3aXRob3V0IGFuIG9mZi1jaGFpbiBpbmRleGVyLgoKIyBFcnJvcnMKCiogW2BGb3JnZUVycm9yOjpJbnZhbGlkSW5wdXRgXSDigJQgYGxpbWl0YCBpcyB6ZXJvLgAAABxzdWJzY3JpcHRpb25zX2Zvcl9zdWJzY3JpYmVyAAAAAwAAAAAAAAAKc3Vic2NyaWJlcgAAAAAAEwAAAAAAAAAGb2Zmc2V0AAAAAAAEAAAAAAAAAAVsaW1pdAAAAAAAAAQAAAABAAAD6QAAA+oAAAfQAAAADFN1YnNjcmlwdGlvbgAAB9AAAAAKRm9yZ2VFcnJvcgAA",
+        "AAAABQAAAAAAAAAAAAAAB0NoYXJnZWQAAAAAAQAAAAdjaGFyZ2VkAAAAAAQAAAAAAAAAD3N1YnNjcmlwdGlvbl9pZAAAAAAGAAAAAQAAAAAAAAAGYW1vdW50AAAAAAALAAAAAAAAAAAAAAAMbGFzdF9jaGFyZ2VkAAAABgAAAAAAAAAAAAAADm5leHRfY2hhcmdlX2F0AAAAAAAGAAAAAAAAAAI=",
+        "AAAABQAAAAAAAAAAAAAAB1JlbmV3ZWQAAAAAAQAAAAdyZW5ld2VkAAAAAAIAAAAAAAAAD3N1YnNjcmlwdGlvbl9pZAAAAAAGAAAAAQAAAAAAAAASY29tcGxldGVkX3JlbmV3YWxzAAAAAAAEAAAAAAAAAAI=",
+        "AAAABQAAAAAAAAAAAAAACUNhbmNlbGxlZAAAAAAAAAEAAAAJY2FuY2VsbGVkAAAAAAAAAgAAAAAAAAAPc3Vic2NyaXB0aW9uX2lkAAAAAAYAAAABAAAAAAAAAApzdWJzY3JpYmVyAAAAAAATAAAAAAAAAAI=",
+        "AAAABQAAAAAAAAAAAAAAFFJlbmV3YWxQb2xpY3lDaGFuZ2VkAAAAAQAAABZyZW5ld2FsX3BvbGljeV9jaGFuZ2VkAAAAAAADAAAAAAAAAA9zdWJzY3JpcHRpb25faWQAAAAABgAAAAEAAAAAAAAAB2VuYWJsZWQAAAAAAQAAAAAAAAAAAAAADG1heF9yZW5ld2FscwAAAAQAAAAAAAAAAg==",
         "AAAAAQAAAD5BIHBhcnRpY2lwYW50IGluIGEgbXVsdGktcGFydHkgZmxvdyAoZXNjcm93LCBnb3Zlcm5hbmNlLCAuLi4pLgAAAAAAAAAAAAVQYXJ0eQAAAAAAAAMAAAAkT24tY2hhaW4gYWRkcmVzcyBvZiB0aGUgcGFydGljaXBhbnQuAAAAB2FkZHJlc3MAAAAAEwAAAD9XaGV0aGVyIHRoaXMgcGFydHkgaGFzIGdyYW50ZWQgYXBwcm92YWwgZm9yIHRoZSBjdXJyZW50IGFjdGlvbi4AAAAACGFwcHJvdmVkAAAAAQAAADlIdW1hbi1yZWFkYWJsZSByb2xlIGxhYmVsLCBlLmcuIGAiYnV5ZXIiYCBvciBgImFyYml0ZXIiYC4AAAAAAAAEcm9sZQAAABA=",
         "AAAAAQAAALtJbmNsdXNpdmUgdGltZSB3aW5kb3cgZXhwcmVzc2VkIGFzIFVuaXggdGltZXN0YW1wcyAoc2Vjb25kcykuCgpTdG9yZWQgYXMgcGxhaW4gYHU2NGAgYmVjYXVzZSBgc29yb2Jhbl9zZGtgIG1vZGVscyB0aW1lIGFzIGB1NjRgOyBhCmRlZGljYXRlZCBuZXd0eXBlIHdvdWxkIGFkZCBjb252ZXJzaW9ucyB3aXRob3V0IGJlbmVmaXQuAAAAAAAAAAAKVGltZUJvdW5kcwAAAAAAAgAAADhMYXRlc3QgbW9tZW50IChpbmNsdXNpdmUpIGF0IHdoaWNoIHRoZSB3aW5kb3cgaXMgYWN0aXZlLgAAAANlbmQAAAAABgAAADpFYXJsaWVzdCBtb21lbnQgKGluY2x1c2l2ZSkgYXQgd2hpY2ggdGhlIHdpbmRvdyBpcyBhY3RpdmUuAAAAAAAFc3RhcnQAAAAAAAAG",
         "AAAAAQAAAUBBIHBhZ2Ugb2YgcmVzdWx0cyBwbHVzIHRoZSBjdXJzb3IgbmVlZGVkIHRvIGZldGNoIHRoZSBuZXh0IHBhZ2UuCgpJdGVtcyBhcmUgc3RvcmVkIGFzIHNlcmlhbGl6ZWQgYEJ5dGVzYCBzbyB0aGUgaGVscGVyIGlzIGFnbm9zdGljIHRvIHRoZQpjb25jcmV0ZSB2YWx1ZSB0eXBlIGEgY29udHJhY3QgcGFnaW5hdGVzLiBDYWxsZXJzIGRlY29kZSBlYWNoIGl0ZW0gaW50bwp0aGVpciBkb21haW4gdHlwZS4gYERlYnVnYCBpcyBvbWl0dGVkIGJlY2F1c2UgdGhlIFNESyBjb2xsZWN0aW9uIGRvZXMgbm90CmltcGxlbWVudCBpdCBmb3IgdGhpcyBjb250cmFjdCB0eXBlLgAAAAAAAAAPUGFnaW5hdGVkUmVzdWx0AAAAAAMAAAA9Q3Vyc29yIGRlc2NyaWJpbmcgdGhlIG5leHQgcGFnZSAob2Zmc2V0IGFkdmFuY2VkIGJ5IGBsaW1pdGApLgAAAAAAAAZjdXJzb3IAAAAAB9AAAAAQUGFnaW5hdGlvbkN1cnNvcgAAABNJdGVtcyBvbiB0aGlzIHBhZ2UuAAAAAAVpdGVtcwAAAAAAA+oAAAAOAAAAJ1RvdGFsIG51bWJlciBvZiBpdGVtcyBhY3Jvc3MgYWxsIHBhZ2VzLgAAAAAFdG90YWwAAAAAAAAE",
@@ -444,13 +503,17 @@ export class Client extends ContractClient {
   }
   public readonly fromJSON = {
     pause: this.txFromJSON<Result<void>>,
+        renew: this.txFromJSON<Result<i128>>,
         cancel: this.txFromJSON<Result<void>>,
         charge: this.txFromJSON<Result<i128>>,
         resume: this.txFromJSON<Result<void>>,
         subscribe: this.txFromJSON<Result<u64>>,
+        charge_catchup: this.txFromJSON<Result<i128>>,
         revoke_provider: this.txFromJSON<Result<void>>,
         get_subscription: this.txFromJSON<Result<Subscription>>,
         authorize_provider: this.txFromJSON<Result<void>>,
+        get_renewal_policy: this.txFromJSON<Result<RenewalPolicy>>,
+        set_renewal_policy: this.txFromJSON<Result<void>>,
         get_subscription_count: this.txFromJSON<u64>,
         is_provider_authorized: this.txFromJSON<boolean>,
         subscribe_on_behalf_of: this.txFromJSON<Result<u64>>,

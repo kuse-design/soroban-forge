@@ -35,13 +35,13 @@ PACKAGES=(
 )
 
 build_artifacts() {
-  cargo build --locked --release --target "$TARGET" \
-    --package soroban-forge-escrow \
-    --package soroban-forge-vesting \
-    --package soroban-forge-multi-sig-wallet \
-    --package soroban-forge-dao-governance \
-    --package soroban-forge-subscription-payments \
-    --package soroban-forge-marketplace-royalties
+  # soroban-sdk 28 requires a spec-shaking build system (stellar-cli 25.2+);
+  # plain `cargo build --target wasm32v1-none` is rejected by the SDK build
+  # script. The workspace's cdylib crates are exactly the contract crates,
+  # so a workspace-wide build covers the artifact set. --optimize=false
+  # keeps the output deterministic (no wasm-opt in the hash chain) while
+  # staying far below the 150KB size budget.
+  stellar contract build --locked --profile release --optimize=false
 }
 
 write_manifest() {

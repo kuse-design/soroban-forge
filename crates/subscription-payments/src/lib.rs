@@ -30,7 +30,8 @@
 //!   opt-in from the subscriber for that provider.
 //! - `charge` requires the provider (who pulls payment) and bills when a
 //!   full period has elapsed since the last charge, executing a SEP-41 token
-//!   transfer from subscriber to provider.
+//!   transfer from subscriber to provider in pull mode, or from prepaid
+//!   contract custody to provider after a subscriber opts in with `deposit`.
 //! - `charge_catchup` requires the provider and atomically bills multiple
 //!   elapsed periods, bounded by [`MAX_CATCHUP_PERIODS`]. It refuses
 //!   `PastDue` subscriptions so arrears retry semantics remain owned by
@@ -54,6 +55,8 @@
 //! | `revoke_provider`          | subscriber                         |
 //! | `subscribe_on_behalf_of`   | provider + valid subscriber opt-in |
 //! | `charge`                   | provider (existing authorization)  |
+//! | `deposit`                  | subscriber                         |
+//! | `withdraw_balance`         | subscriber                         |
 //! | `set_quotas`               | subscriber (prices the overage)    |
 //! | `record_usage`             | provider (meters the service)      |
 //! | `pause`                    | subscriber                         |
@@ -253,6 +256,23 @@ pub trait SorobanForgeSubscriptionPayments {
         subscription_id: u64,
     ) -> Result<i128, soroban_forge_shared_utils::ForgeError>;
 
+    /// Opt this subscription into prepaid mode and deposit `amount` tokens.
+    /// Requires the subscriber; the exact SEP-41 transfer occurs before the
+    /// balance is updated. A cancelled subscription cannot be funded.
+    fn deposit(
+        env: Env,
+        subscription_id: u64,
+        amount: i128,
+    ) -> Result<i128, soroban_forge_shared_utils::ForgeError>;
+
+    /// Withdraw prepaid funds before cancellation. Requires the subscriber.
+    /// The subscription remains in prepaid mode, including at a zero balance.
+    fn withdraw_balance(
+        env: Env,
+        subscription_id: u64,
+        amount: i128,
+    ) -> Result<i128, soroban_forge_shared_utils::ForgeError>;
+
     /// Atomically charge up to `max_periods` elapsed periods.
     ///
     /// Returns the total billed amount. `max_periods` must not exceed the
@@ -430,6 +450,11 @@ pub struct Subscription {
     pub paused_at: Option<u64>,
     /// Number of consecutive failed billing attempts.
     pub failed_attempts: u32,
+    /// Ledger timestamp at which the subscription first became overdue for the
+    /// current open period, or `None` while the subscription is current.
+    /// Set when a charge observes an elapsed due time without a successful
+    /// payment; cleared on a successful charge.
+    pub past_due_since: Option<u64>,
     /// Per-metric usage quotas priced on top of `amount`.
     ///
     /// Empty is the flat flow: the period bills exactly `amount`. The list is
@@ -437,6 +462,9 @@ pub struct Subscription {
     /// its quotas here when a subscriber joins it), keeping the metering core
     /// independent of where the terms were published.
     pub quotas: Vec<MetricQuota>,
+    /// `None` means pull mode; `Some(balance)` means prepaid mode is enabled.
+    /// A zero balance remains `Some(0)` so topping up never changes modes.
+    pub prepaid_balance: Option<i128>,
 }
 
 /// One metered dimension's pricing terms: units included in the base period
@@ -656,6 +684,38 @@ impl SubscriptionPayments {
         // the subscription untouched and no funds in flight.
         let amount = Self::derive_period_amount(&env, &subscription)?;
 
+        if let Some(balance) = subscription.prepaid_balance {
+            if balance < amount {
+                Self::record_failed_charge(&env, &mut subscription)?;
+                return Ok(0);
+            }
+            let remaining = balance
+                .checked_sub(amount)
+                .ok_or(ForgeError::ArithmeticOverflow)?;
+            let transfer_result = token::TokenClient::new(&env, &subscription.token).try_transfer(
+                &env.current_contract_address(),
+                &subscription.provider,
+                &amount,
+            );
+            if !matches!(transfer_result, Ok(Ok(()))) {
+                Self::record_failed_charge(&env, &mut subscription)?;
+                return Ok(0);
+            }
+
+            subscription.prepaid_balance = Some(remaining);
+            subscription.last_charged = next_due;
+            subscription.failed_attempts = 0;
+            subscription.status = SubscriptionStatus::Active;
+            subscription.paused_at = None;
+            Self::rollover_usage(&env, &subscription);
+            env.storage()
+                .instance()
+                .set(&DataKey::Subscription(subscription_id), &subscription);
+            events::charged(&env, &subscription, amount);
+            events::balance_debited(&env, subscription_id, amount, remaining);
+            return Ok(amount);
+        }
+
         // Execute SEP-41 token transfer from subscriber to provider
         let transfer_result = token::TokenClient::new(&env, &subscription.token).try_transfer(
             &subscription.subscriber,
@@ -679,19 +739,117 @@ impl SubscriptionPayments {
                 Ok(amount)
             }
             _ => {
-                let failed = subscription.failed_attempts.saturating_add(1);
-                subscription.failed_attempts = failed;
-                if failed >= MAX_RETRIES {
-                    subscription.status = SubscriptionStatus::Cancelled;
-                } else {
-                    subscription.status = SubscriptionStatus::PastDue;
-                }
-                env.storage()
-                    .instance()
-                    .set(&DataKey::Subscription(subscription_id), &subscription);
+                Self::record_failed_charge(&env, &mut subscription)?;
                 Ok(0)
             }
         }
+    }
+
+    fn record_failed_charge(env: &Env, subscription: &mut Subscription) -> Result<(), ForgeError> {
+        let failed = subscription.failed_attempts.saturating_add(1);
+        subscription.failed_attempts = failed;
+        subscription.status = if failed >= MAX_RETRIES {
+            SubscriptionStatus::Cancelled
+        } else {
+            SubscriptionStatus::PastDue
+        };
+        let refund = if subscription.status == SubscriptionStatus::Cancelled {
+            if let Some(balance) = subscription.prepaid_balance {
+                if balance > 0 {
+                    let transfer_result = token::TokenClient::new(env, &subscription.token)
+                        .try_transfer(
+                            &env.current_contract_address(),
+                            &subscription.subscriber,
+                            &balance,
+                        );
+                    if !matches!(transfer_result, Ok(Ok(()))) {
+                        return Err(ForgeError::TokenTransferFailed);
+                    }
+                    subscription.prepaid_balance = Some(0);
+                    Some(balance)
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+        env.storage().instance().set(
+            &DataKey::Subscription(subscription.subscription_id),
+            subscription,
+        );
+        if let Some(amount) = refund {
+            events::balance_refunded(env, subscription.subscription_id, amount, 0);
+        }
+        Ok(())
+    }
+
+    /// Pull tokens into custody and enable prepaid mode only after success.
+    pub fn deposit(env: Env, subscription_id: u64, amount: i128) -> Result<i128, ForgeError> {
+        if amount <= 0 {
+            return Err(ForgeError::InvalidInput);
+        }
+        let mut subscription = Self::get_subscription_impl(&env, subscription_id)?;
+        if subscription.status == SubscriptionStatus::Cancelled {
+            return Err(ForgeError::InvalidInput);
+        }
+        subscription.subscriber.require_auth();
+        let current = subscription.prepaid_balance.unwrap_or(0);
+        let updated = current
+            .checked_add(amount)
+            .ok_or(ForgeError::ArithmeticOverflow)?;
+        let transfer_result = token::TokenClient::new(&env, &subscription.token).try_transfer(
+            &subscription.subscriber,
+            env.current_contract_address(),
+            &amount,
+        );
+        if !matches!(transfer_result, Ok(Ok(()))) {
+            return Err(ForgeError::TokenTransferFailed);
+        }
+        subscription.prepaid_balance = Some(updated);
+        env.storage()
+            .instance()
+            .set(&DataKey::Subscription(subscription_id), &subscription);
+        events::deposited(&env, subscription_id, amount, updated);
+        Ok(updated)
+    }
+
+    /// Return prepaid funds to the subscriber while retaining prepaid mode.
+    pub fn withdraw_balance(
+        env: Env,
+        subscription_id: u64,
+        amount: i128,
+    ) -> Result<i128, ForgeError> {
+        if amount <= 0 {
+            return Err(ForgeError::InvalidInput);
+        }
+        let mut subscription = Self::get_subscription_impl(&env, subscription_id)?;
+        if subscription.status == SubscriptionStatus::Cancelled {
+            return Err(ForgeError::InvalidInput);
+        }
+        subscription.subscriber.require_auth();
+        let balance = subscription
+            .prepaid_balance
+            .ok_or(ForgeError::InsufficientFunds)?;
+        let remaining = balance
+            .checked_sub(amount)
+            .ok_or(ForgeError::InsufficientFunds)?;
+        let transfer_result = token::TokenClient::new(&env, &subscription.token).try_transfer(
+            &env.current_contract_address(),
+            &subscription.subscriber,
+            &amount,
+        );
+        if !matches!(transfer_result, Ok(Ok(()))) {
+            return Err(ForgeError::TokenTransferFailed);
+        }
+        subscription.prepaid_balance = Some(remaining);
+        env.storage()
+            .instance()
+            .set(&DataKey::Subscription(subscription_id), &subscription);
+        events::balance_refunded(&env, subscription_id, amount, remaining);
+        Ok(remaining)
     }
 
     /// Atomically bill multiple elapsed periods.
@@ -706,6 +864,11 @@ impl SubscriptionPayments {
 
         let mut subscription = Self::get_subscription_impl(&env, subscription_id)?;
         if subscription.status != SubscriptionStatus::Active {
+            return Err(ForgeError::InvalidInput);
+        }
+        if subscription.prepaid_balance.is_some() {
+            // Prepaid balances use one-period lapse/retry semantics through
+            // `charge`; catch-up must not bypass them by pulling from payer.
             return Err(ForgeError::InvalidInput);
         }
         subscription.provider.require_auth();
@@ -914,11 +1077,31 @@ impl SubscriptionPayments {
         }
         subscription.subscriber.require_auth();
 
+        let mut refund = None;
+        if let Some(balance) = subscription.prepaid_balance {
+            if balance > 0 {
+                let transfer_result = token::TokenClient::new(&env, &subscription.token)
+                    .try_transfer(
+                        &env.current_contract_address(),
+                        &subscription.subscriber,
+                        &balance,
+                    );
+                if !matches!(transfer_result, Ok(Ok(()))) {
+                    return Err(ForgeError::TokenTransferFailed);
+                }
+                subscription.prepaid_balance = Some(0);
+                refund = Some(balance);
+            }
+        }
+
         subscription.status = SubscriptionStatus::Cancelled;
         subscription.paused_at = None;
         env.storage()
             .instance()
             .set(&DataKey::Subscription(subscription_id), &subscription);
+        if let Some(amount) = refund {
+            events::balance_refunded(&env, subscription_id, amount, 0);
+        }
         events::cancelled(&env, &subscription);
         Ok(())
     }
@@ -1015,10 +1198,12 @@ impl SubscriptionPayments {
             status: SubscriptionStatus::Active,
             paused_at: None,
             failed_attempts: 0,
+            past_due_since: None,
             // Flat by default: a subscription is metered only when the
             // subscriber declares quotas (today via `set_quotas`, and later
             // copied from the plan it joins).
             quotas: Vec::new(env),
+            prepaid_balance: None,
         };
         env.storage()
             .instance()
@@ -1321,6 +1506,57 @@ mod events {
         pub subscriber: Address,
     }
 
+    #[contractevent]
+    pub struct Deposited {
+        #[topic]
+        pub subscription_id: u64,
+        pub amount: i128,
+        pub balance_after: i128,
+    }
+
+    #[contractevent]
+    pub struct BalanceDebited {
+        #[topic]
+        pub subscription_id: u64,
+        pub amount: i128,
+        pub balance_after: i128,
+    }
+
+    #[contractevent]
+    pub struct BalanceRefunded {
+        #[topic]
+        pub subscription_id: u64,
+        pub amount: i128,
+        pub balance_after: i128,
+    }
+
+    pub fn deposited(env: &Env, subscription_id: u64, amount: i128, balance_after: i128) {
+        Deposited {
+            subscription_id,
+            amount,
+            balance_after,
+        }
+        .publish(env);
+    }
+
+    pub fn balance_debited(env: &Env, subscription_id: u64, amount: i128, balance_after: i128) {
+        BalanceDebited {
+            subscription_id,
+            amount,
+            balance_after,
+        }
+        .publish(env);
+    }
+
+    pub fn balance_refunded(env: &Env, subscription_id: u64, amount: i128, balance_after: i128) {
+        BalanceRefunded {
+            subscription_id,
+            amount,
+            balance_after,
+        }
+        .publish(env);
+    }
+
     pub fn charged(env: &Env, subscription: &Subscription, amount: i128) {
         let next_charge_at = subscription
             .last_charged
@@ -1367,7 +1603,12 @@ mod authz;
 #[cfg(test)]
 mod metering;
 #[cfg(test)]
+mod prepaid;
+#[cfg(test)]
 mod props;
+
+#[cfg(test)]
+mod indexer_fixtures;
 
 #[cfg(test)]
 mod tests {

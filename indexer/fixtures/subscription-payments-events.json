@@ -1,0 +1,63 @@
+{
+  "contract": {
+    "id": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M",
+    "name": "soroban-forge-subscription-payments"
+  },
+  "description": "Deterministic subscribe/charge/cancel events from the Soroban Forge subscription payments contract.",
+  "events": [
+    {
+      "contractId": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M",
+      "eventIndex": 0,
+      "id": "0-0",
+      "inSuccessfulContractCall": true,
+      "ledger": 0,
+      "ledgerClosedAt": "2026-09-23T00:00:00.000Z",
+      "operationIndex": 0,
+      "pagingToken": "0-0",
+      "topic": [
+        "AAAADwAAAAh0cmFuc2Zlcg==",
+        "AAAAEgAAAAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABA==",
+        "AAAAEgAAAAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABQ==",
+        "AAAADgAAADxhYWE6R0FBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUVHV0Y="
+      ],
+      "transactionHash": "0000000000000000000000000000000000000000000000000000000000000000",
+      "type": "contract",
+      "value": "AAAACgAAAAAAAAAAAAAAAAAAAPo="
+    },
+    {
+      "contractId": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M",
+      "eventIndex": 1,
+      "id": "0-1",
+      "inSuccessfulContractCall": true,
+      "ledger": 1,
+      "ledgerClosedAt": "2026-09-23T00:00:00.000Z",
+      "operationIndex": 0,
+      "pagingToken": "0-1",
+      "topic": [
+        "AAAADwAAAAdjaGFyZ2VkAA==",
+        "AAAABQAAAAAAAAAB"
+      ],
+      "transactionHash": "0000000000000000000000000000000000000000000000000000000000000000",
+      "type": "contract",
+      "value": "AAAAEQAAAAEAAAADAAAADwAAAAZhbW91bnQAAAAAAAoAAAAAAAAAAAAAAAAAAAD6AAAADwAAAAxsYXN0X2NoYXJnZWQAAAAFAAAAAAAPRigAAAAPAAAADm5leHRfY2hhcmdlX2F0AAAAAAAFAAAAAAAPShA="
+    },
+    {
+      "contractId": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M",
+      "eventIndex": 0,
+      "id": "0-0",
+      "inSuccessfulContractCall": true,
+      "ledger": 0,
+      "ledgerClosedAt": "2026-09-23T00:00:00.000Z",
+      "operationIndex": 0,
+      "pagingToken": "0-0",
+      "topic": [
+        "AAAADwAAAAljYW5jZWxsZWQAAAA=",
+        "AAAABQAAAAAAAAAB"
+      ],
+      "transactionHash": "0000000000000000000000000000000000000000000000000000000000000000",
+      "type": "contract",
+      "value": "AAAAEQAAAAEAAAABAAAADwAAAApzdWJzY3JpYmVyAAAAAAASAAAAAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAE"
+    }
+  ],
+  "schema": 1
+}

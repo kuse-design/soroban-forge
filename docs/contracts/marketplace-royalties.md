@@ -9,11 +9,15 @@ and settled atomically in real SEP-41 tokens by `settle_sale` (one sale) or
 
 ```rust
 fn set_royalty(collection, recipient, bps) -> Result<(), ForgeError>
+fn disable_royalty(collection) -> Result<(), ForgeError>
+fn enable_royalty(collection) -> Result<(), ForgeError>
+fn distribute(collection, seller, amount) -> Result<i128, ForgeError>
 fn distribute(collection, token, payer, seller, amount) -> Result<i128, ForgeError>
 fn settle_sale(collection, token, payer, seller, amount) -> Result<Settlement, ForgeError>
 fn settle_sales(collection, token, payer, sales: Vec<(seller, amount)>) -> Result<Vec<Settlement>, ForgeError>
 fn get_royalty(collection) -> Result<Royalty, ForgeError>
 fn get_settlement_summary(collection) -> Result<SettlementSummary, ForgeError>
+fn quote_sale(collection, amount) -> Result<SaleQuote, ForgeError>
 fn touch_ttl(collection) -> Result<(), ForgeError>
 ```
 
@@ -59,6 +63,24 @@ and only need the royalty leg settled; a `Disabled` or zero-bps
 configuration transfers nothing and returns the full `amount`. It requires
 the collection's and the payer's authorization, and emits the same
 `SaleSettled` event as the settlement entrypoints.
+
+### Sale quotes
+
+`quote_sale(collection, amount)` is a read-only view returning the exact
+split a settlement of `amount` would apply, as a `SaleQuote { gross,
+royalty_bps, royalty_amount, seller_net }`. Settle-parity guarantee: the
+quote runs the same validation order and the same derivation as the
+settlement entrypoints — configuration load (`NotFound` for an unregistered
+collection), `amount > 0` (`InvalidInput`, mirroring `distribute` and
+`settle_sale`), then the same `effective_bps` + `split` resolution — so the
+returned numbers are the settlement's own, floor rounding included, and
+`royalty_amount + seller_net == gross` exactly. A `Disabled` configuration
+quotes at zero bps, matching `settle_sale`'s settle-in-full behavior. The
+quote never mutates storage, requires no authorization, and emits no events.
+It is the per-sale counterpart of `get_settlement_summary` and exists so a
+marketplace UI can display "you will pay X, royalty is Y, seller receives
+Z" from the contract's own math instead of a parallel off-chain
+implementation.
 
 ### Batch settlement
 
@@ -121,3 +143,11 @@ The contract emits typed on-chain lifecycle events for indexers and off-chain mo
 - `RoyaltyConfigured` (topic: `collection: Address`) — emitted when a royalty configuration is registered or updated via `set_royalty`. Contains `recipient` and `bps`.
 - `SaleSettled` (topic: `collection: Address`) — emitted on sale settlement via `settle_sale` or `settle_sales`. Contains `token`, `payer`, `seller`, `royalty_recipient`, `gross_amount`, `seller_net`, and `royalty_share`.
 
+## Per-Sale Split Override
+
+`settle_sale_with_split` accepts an optional `SplitOverride { recipient, bps }`.
+When present, it applies to this sale only and does not change the collection's
+stored configuration. Rates from 0 through 10,000 basis points are valid;
+larger rates fail before any transfer. The existing split helper, summary
+accounting, and `SaleSettled` event are shared with `settle_sale`. Passing
+`None` preserves existing configured behavior.

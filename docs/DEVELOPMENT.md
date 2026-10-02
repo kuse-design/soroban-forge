@@ -10,7 +10,7 @@ Build and run the developer CLI:
 
 ```bash
 # Build CLI binary
-cargo build -p soroban-forge-cli
+cargo build --locked -p soroban-forge-cli
 
 # Scaffold a new Soroban contract crate
 cargo run -p soroban-forge-cli -- new my-token
@@ -21,6 +21,25 @@ cargo run -p soroban-forge-cli -- new my-token --path ./custom/path/my-token
 
 The generated crate is a standalone project that compiles with `cargo check`
 without depending on the workspace layout or a stale shared-utils version pin.
+
+Run the local environment preflight before deploying a contract:
+
+```bash
+# Check stellar, cargo, and the wasm32v1-none target
+cargo run -p soroban-forge-cli -- doctor
+
+# Also verify that a selected artifact exists and is non-empty
+cargo run -p soroban-forge-cli -- doctor \
+  --wasm target/wasm32v1-none/release/soroban_forge_escrow.wasm
+```
+
+`doctor` never installs tools or performs network checks. It runs every check in order and prints
+PASS/FAIL rows plus an exact remediation command for each failure. `stellar --version` and
+`cargo --version` are reported when available; if an existing binary returns a non-zero status or
+no usable version, the check remains PASS with `version unknown`. The target check only passes when
+`rustup target list --installed` succeeds and includes `wasm32v1-none`. The optional artifact check
+distinguishes a missing path, directory, empty file, and filesystem error. Any required failure
+causes the command to exit non-zero and lists the failed checks in the summary.
 
 ```bash
 # Install or update Rust
@@ -62,13 +81,13 @@ cargo metadata --locked --no-deps --format-version 1 > /dev/null
 
 ```bash
 make build
-# or: cargo build --workspace --all-targets
+# or: cargo build --workspace --all-targets --locked
 ```
 
 ### Release Build (WASM Artifacts)
 
 ```bash
-cargo build --release --target wasm32v1-none -p soroban-forge-escrow
+cargo build --locked --release --target wasm32v1-none -p soroban-forge-escrow
 # Builds: target/wasm32v1-none/release/soroban_forge_escrow.wasm
 ```
 
@@ -166,22 +185,22 @@ make test
 
 ```bash
 # Escrow
-cargo test --workspace --package soroban-forge-escrow
+cargo test --workspace --package soroban-forge-escrow --locked
 
 # Vesting
-cargo test --workspace --package soroban-forge-vesting
+cargo test --workspace --package soroban-forge-vesting --locked
 
 # Multi-Sig Wallet
-cargo test --workspace --package soroban-forge-multi-sig-wallet
+cargo test --workspace --package soroban-forge-multi-sig-wallet --locked
 
 # DAO Governance
-cargo test --workspace --package soroban-forge-dao-governance
+cargo test --workspace --package soroban-forge-dao-governance --locked
 
 # Subscription Payments
-cargo test --workspace --package soroban-forge-subscription-payments
+cargo test --workspace --package soroban-forge-subscription-payments --locked
 
 # Marketplace Royalties
-cargo test --workspace --package soroban-forge-marketplace-royalties
+cargo test --workspace --package soroban-forge-marketplace-royalties --locked
 ```
 
 ## Lint and Format
@@ -204,7 +223,7 @@ make format-check
 
 ```bash
 make lint
-# or: cargo clippy --workspace --all-targets -- -D warnings
+# or: cargo clippy --workspace --all-targets --locked -- -D warnings
 ```
 
 ### Security Audit
@@ -296,12 +315,40 @@ an existing entry while it remains present in persistent storage.
 An active escrow with no state-changing activity can eventually reach expiry.
 Once the persistent escrow entry has expired, `touch_ttl` cannot recover it:
 the current implementation calls `load_escrow` before attempting the TTL
-extension, and a missing entry is reported as `NotFound`. The expired record
-is therefore inaccessible through the current contract interface. Expiration
-of the record does not remove the token balance; the funds remain in the token
-contract at the escrow contract's address. Long-lived active escrows therefore
-require a keeper to call `touch_ttl` before expiry. Anyone may perform this
-keeper action because `touch_ttl` is permissionless.
+extension, and a missing entry is reported as `NotFound` (the id never
+existed, or its persistent entry was archived). `ttl_info(escrow_id)` is a
+read-only keeper view of the remaining ledgers; poll it and call
+`touch_ttl` while the escrow is still present and its TTL approaches the
+29-day bump threshold. SDK 27 does not expose host TTL introspection to
+contracts, so the contract mirrors each escrow expiration ledger in a
+companion persistent key and updates it alongside the escrow's 30-day TTL
+bumps. The test-only `get_ttl` host helper checks this mirror in tests.
+
+If `ttl_info` or `touch_ttl` returns `NotFound`, determine whether the id
+never existed or its escrow entry was archived. A keeper cannot restore an
+archived entry through a contract call. Prepare a transaction whose Soroban
+footprint includes the escrow data key in `readWrite`, simulate it to populate
+resource and fee data, and submit a standalone `RestoreFootprintOp`; after
+restoration confirms, invoke the contract again to read the record and
+continue the recovery flow. On Protocol 23 and later, a simulated invocation
+may include archived entries in its restore list and restore them
+automatically; the standalone operation is useful when restoration fees
+should be paid separately. Restoring the record does not move escrow funds:
+they remain at the escrow contract's address in the token contract, and any
+payout still requires a successful contract invocation against restored
+state. Keeper calls are permissionless.
+
+### Subscription records
+
+`subscription-payments` stores each `DataKey::Subscription(id)` record in
+persistent storage and extends it to 30 days whenever subscribe, charge,
+charge catch-up, pause, resume, or cancel writes the record. The threshold is
+29 days, following the same extend-to pattern as escrow. The `Count` counter
+and the subscriber/provider enumeration indexes remain in instance storage.
+Any account may call `touch_ttl(subscription_id)` to extend a present record;
+it returns `NotFound` when the id is absent. Keepers should touch long-lived
+subscriptions before their TTL approaches expiry. This storage cutover
+assumes no deployed mainnet instance contains live subscription records.
 
 ### Token trust model
 
