@@ -1,0 +1,59 @@
+<!doctype html><html><head><meta charset="utf-8"><title>05-escrow-create</title>
+<link rel="stylesheet" href="forge.css"><style></style></head><body>
+<div class="app">
+  <aside class="side">
+    <div class="logo"><div class="mark"><svg viewBox="0 0 24 24" fill="#1A0A02"><path d="M3 7h13a5 5 0 0 0 5-3v6h-6l-2 4h2v3H7v-3h2l-2-4H5a2 2 0 0 1-2-2z"/></svg></div><span>Soroban <span class="ember">Forge</span></span></div>
+    <div class="navh up">Overview</div><div class="nav"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>Dashboard</div><div class="nav"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>Activity</div><div class="navh up">Contracts</div><div class="nav on"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>Escrow<span class="cnt">12</span></div><div class="nav"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>Vesting<span class="cnt">4</span></div><div class="nav"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z"/><path d="M9 12l2 2 4-4"/></svg>Multi-sig<span class="cnt">3</span></div><div class="nav"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 21h18M5 21V10M19 21V10M9 21V10M15 21V10M12 3l9 5H3z"/></svg>DAO Governance<span class="cnt">7</span></div><div class="nav"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 2l4 4-4 4"/><path d="M3 11v-1a4 4 0 0 1 4-4h14"/><path d="M7 22l-4-4 4-4"/><path d="M21 13v1a4 4 0 0 1-4 4H3"/></svg>Subscriptions<span class="cnt">9</span></div><div class="nav"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 5L5 19"/><circle cx="6.5" cy="6.5" r="2.5"/><circle cx="17.5" cy="17.5" r="2.5"/></svg>Royalties</div><div class="navh up">Build</div><div class="nav"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 15c-1.5 1.5-2 5-2 5s3.5-.5 5-2"/><path d="M9 15l-3-3c1-4 4-9 12-9 0 8-5 11-9 12z"/><circle cx="14.5" cy="9.5" r="1.5"/></svg>Deploy & Templates</div><div class="nav"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 9l3 3-3 3M13 15h4"/></svg>CLI & SDK</div><div class="nav" style="margin-top:8px"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>Settings</div>
+    <div class="sidefoot">
+      <div class="row between"><span class="up">Network</span><span class="pill p-teal"><i></i>Testnet</span></div>
+      <div class="small muted mt8">Ledger <span class="mono">#1,284,903</span> · 5.1s</div>
+      <div class="bar teal mt8"><span style="width:72%"></span></div>
+    </div>
+  </aside>
+  <main class="main">
+    <header class="top">
+      <div class="search"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg><span>Search contracts, ids, addresses…</span><kbd>⌘K</kbd></div>
+      <div class="grow"></div>
+      <div class="btn ghost" style="width:36px;padding:0;justify-content:center;position:relative"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 8 3 8H3s3-1 3-8"/><path d="M10 21a2 2 0 0 0 4 0"/></svg><span style="position:absolute;top:7px;right:8px;width:7px;height:7px;border-radius:50%;background:var(--ember)"></span></div>
+      <div class="btn"><span class="pill p-teal" style="padding:1px 8px"><i></i>Testnet</span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg></div>
+      <div class="btn"><div class="avatar" style="width:20px;height:20px"></div><span class="mono">GCTE…VSGF</span><span class="muted">2,480 XLM</span></div>
+    </header>
+    <div class="content">
+      <div class="crumbs">Contracts <span>/</span> Escrow <span>/</span> <b>New</b></div>
+      <div class="row between"><div><h1>New escrow</h1><div class="muted mt4">Funds are held by the contract until the seller releases, the deadline passes, or the arbiter resolves.</div></div><div class="row gap8"></div></div>
+      
+<div class="steps" style="max-width:760px;margin:4px 0 8px"><div class="step done"><div class="dot"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg></div><div class="lbl">Parties</div></div><div class="step cur"><div class="dot">2</div><div class="lbl">Terms</div></div><div class="step"><div class="dot">3</div><div class="lbl">Review</div></div><div class="step"><div class="dot">4</div><div class="lbl">Sign &amp; deposit</div></div></div>
+<div class="grid" style="grid-template-columns:1.5fr 1fr;gap:20px;align-items:start">
+  <div class="card" style="padding:26px">
+    <h2>Terms</h2><div class="muted small mt4">Define what is locked and when it can move.</div>
+    <div class="grid g2 mt24" style="gap:18px">
+      <div class="field" style="grid-column:span 2"><label>Title (off-chain label)</label><div class="input"><span>Website redesign · milestone 2</span></div></div>
+      <div class="field"><label>Token</label><div class="input"><span style="width:20px;height:20px;border-radius:50%;background:#2775CA;display:inline-block"></span><span>USDC</span><span class="dim mono small">CBJQ…L23O</span><span class="suf"><svg width=15 viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg></span></div></div>
+      <div class="field"><label>Amount</label><div class="input focus"><span style="font-weight:600">1,500.00</span><span class="suf">MAX</span></div><span class="hint">Wallet balance: 2,140.55 USDC</span></div>
+      <div class="field"><label>Release deadline (timeout)</label><div class="input"><span>Oct 26, 2026 · 18:00</span><span class="suf"><svg width=15 viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg></span></div><span class="hint">After this, the buyer may refund the remaining balance.</span></div>
+      <div class="field"><label>Allow partial releases</label><div class="input" style="justify-content:space-between"><span>Seller can release in milestones</span><span class="toggle on"></span></div></div>
+    </div>
+    <div class="sep mt24"></div>
+    <h3 class="mt20">Parties</h3>
+    <div class="col mt12" style="gap:10px">
+      <div class="row" style="padding:12px 14px;background:var(--bg2);border:1px solid var(--line);border-radius:12px"><div class="avatar"></div><div class="grow"><div class="small" style="font-weight:600">Buyer · you</div><div class="mono tiny dim">GCTEIX…VSGF</div></div><span class="pill p-teal">Signs create + deposit</span></div>
+      <div class="row" style="padding:12px 14px;background:var(--bg2);border:1px solid var(--line);border-radius:12px"><div class="avatar av-b"></div><div class="grow"><div class="small" style="font-weight:600">Seller</div><div class="mono tiny dim">GCGPZ3…4SFS</div></div><span class="pill">Releases funds</span></div>
+      <div class="row" style="padding:12px 14px;background:var(--bg2);border:1px solid var(--line);border-radius:12px"><div class="avatar av-c"></div><div class="grow"><div class="small" style="font-weight:600">Arbiter</div><div class="mono tiny dim">GCR7CB…GJTQ</div></div><span class="pill p-violet">Resolves disputes</span></div>
+    </div>
+    <div class="row between mt24"><span class="btn ghost">Back</span><span class="btn pri">Review escrow <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg></span></div>
+  </div>
+  <div class="col" style="gap:16px">
+    <div class="card"><div class="up">Summary</div>
+      <dl class="kv mt16"><dt>Locked</dt><dd style="font-weight:700">1,500.00 USDC</dd><dt>Network fee</dt><dd>~0.0124 XLM</dd><dt>Deadline</dt><dd>in 7 days</dd><dt>Partial release</dt><dd class="teal">Enabled</dd><dt>Contract</dt><dd class="mono small">CC227U…ZHSB</dd></dl></div>
+    <div class="card"><div class="up">What happens next</div>
+      <div class="tl mt16">
+        <div class="tl-i"><div class="d i-blue"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><path d="M14 3v6h6"/></svg></div><div><div class="small" style="font-weight:600">create_escrow</div><div class="tiny dim">Buyer signs · status <b>Pending</b></div></div></div>
+        <div class="tl-i"><div class="d i-amber"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M6 13l6 6 6-6"/></svg></div><div><div class="small" style="font-weight:600">deposit</div><div class="tiny dim">1,500 USDC buyer → contract · <b>Funded</b></div></div></div>
+        <div class="tl-i"><div class="d i-teal"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg></div><div><div class="small" style="font-weight:600">release / release_partial</div><div class="tiny dim">Seller-authorised payout · <b>Completed</b></div></div></div>
+      </div></div>
+    <div class="note n-amber"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l10 18H2z"/><path d="M12 10v4M12 17.5v.5"/></svg><span>Escrow creation is buyer-signed only. The seller does not need to be online.</span></div>
+  </div>
+</div>
+    </div>
+  </main>
+</div><script src="nav.js"></script></body></html>

@@ -7,6 +7,12 @@
 //! **P1 — Threshold enforcement.** For a generated bounded sequence of
 //! confirm actions over the fixed owner pool:
 //!
+//! The `submit` helper below passes empty memo/metadata so the property
+//! tests exercise the metadata-extended `submit` signature while keeping
+//! the generated cases focused on threshold and execute-once behaviour.
+//! Metadata storage/retrieval itself is covered by the hand-written suite
+//! in `lib.rs`.
+//!
 //! ```text
 //! execute succeeds  ⟺  distinct confirmations >= threshold  (and no rejections)
 //! ```
@@ -151,7 +157,7 @@ impl World {
     /// Submit an opaque tx against the counting target; returns its id.
     fn submit(&self) -> u64 {
         self.client
-            .submit(&self.accounts.user1, &self.target, &self.payload())
+            .submit(&self.accounts.user1, &self.target, &self.payload(), &None)
     }
 
     /// Dispatch count recorded by the counting target.

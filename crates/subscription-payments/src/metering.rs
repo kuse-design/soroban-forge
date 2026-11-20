@@ -1,6 +1,9 @@
 //! Metered-usage suite for subscription payments: exact overage math, period
 //! boundaries, caps, and rollover.
 //!
+//! Settlement coverage: real SEP-41 transfers on `charge()`, transfer-before-
+//! state ordering, arrears-retry on failure, and conservation across periods.
+//!
 //! Layered like the crate's other suites:
 //! - **Pure derivation** — [`period_amount`] and its helpers, with no
 //!   `Env`-backed state, exercised directly at bucket/cap/overflow
@@ -14,7 +17,8 @@
 
 use crate::{
     billable_buckets, metric_overage, period_amount, usage_units, validate_quotas, MetricQuota,
-    SorobanForgeSubscriptionPaymentsClient, SubscriptionPayments, UsageRecord, MAX_QUOTAS,
+    SorobanForgeSubscriptionPaymentsClient, SubscriptionPayments, SubscriptionStatus, UsageRecord,
+    MAX_QUOTAS,
 };
 use soroban_forge_shared_utils::ForgeError;
 use soroban_sdk::testutils::{Address as _, Events as _, Ledger as _};
@@ -956,6 +960,124 @@ fn a_failed_settlement_publishes_no_metering_events() {
     let calls = Symbol::new(&env, CALLS);
     assert_eq!(client.get_usage(&broke_id, &calls).units, 11_001);
     assert_eq!(client.quote_period(&broke_id), AMOUNT + 50);
+}
+
+// ---------------------------------------------------------------------------
+// Settlement: transfer-before-state and conservation
+// ---------------------------------------------------------------------------
+
+#[test]
+fn charge_transfers_the_derived_amount_from_subscriber_to_provider() {
+    let (env, _token, _tc, client, accounts, subscription_id) = setup_with_quotas!(calls_and_bytes);
+    client.record_usage(&subscription_id, &Symbol::new(&env, CALLS), &11_001);
+
+    let provider = client.get_subscription(&subscription_id).provider;
+    let subscriber_before = token_balance(&client, &accounts.user1);
+    let provider_before = token_balance(&client, &provider);
+
+    env.ledger().set_timestamp(START + PERIOD);
+    let charged = client.charge(&subscription_id);
+    assert_eq!(charged, AMOUNT + 50);
+
+    // The subscriber paid exactly the derived bill; the provider received it.
+    assert_eq!(
+        token_balance(&client, &accounts.user1),
+        subscriber_before - charged
+    );
+    assert_eq!(token_balance(&client, &provider), provider_before + charged);
+}
+
+#[test]
+fn failed_transfer_preserves_balances_and_meters_for_the_arrears_retry() {
+    let (env, token, _tc, client, accounts, _subscription_id) = setup!();
+    // Exactly the base: any overage makes the transfer fail.
+    let broke = Address::generate(&env);
+    StellarAssetClient::new(&env, &token).mint(&broke, &AMOUNT);
+    let broke_id = client.subscribe(&broke, &accounts.validator, &token, &AMOUNT, &PERIOD);
+    client.set_quotas(&broke_id, &calls_and_bytes(&env));
+    client.record_usage(&broke_id, &Symbol::new(&env, CALLS), &11_001);
+
+    let provider = client.get_subscription(&broke_id).provider;
+    let subscriber_before = token_balance(&client, &broke);
+    let provider_before = token_balance(&client, &provider);
+    let subscription_before = client.get_subscription(&broke_id);
+
+    env.ledger().set_timestamp(START + PERIOD);
+    // The transfer fails, so `charge` reports zero collected and moves no
+    // funds or meters; the subscription enters the arrears-retry state so
+    // the retry bills the exact attempted amount again.
+    assert_eq!(client.charge(&broke_id), 0);
+
+    assert_eq!(token_balance(&client, &broke), subscriber_before);
+    assert_eq!(token_balance(&client, &provider), provider_before);
+    // The meter freezes at the attempted amount: the retry bills the same.
+    assert_eq!(
+        client.get_usage(&broke_id, &Symbol::new(&env, CALLS)).units,
+        11_001
+    );
+    // State advances to PastDue with the failure recorded, while the
+    // billing fields stay put.
+    let subscription_after = client.get_subscription(&broke_id);
+    assert_eq!(subscription_after.status, SubscriptionStatus::PastDue);
+    assert_eq!(subscription_after.failed_attempts, 1);
+    assert_eq!(
+        subscription_after.last_charged,
+        subscription_before.last_charged
+    );
+    assert_eq!(subscription_after.quotas, subscription_before.quotas);
+}
+
+#[test]
+fn multiple_charges_across_periods_conserve_value() {
+    let (env, _token, _tc, client, accounts, subscription_id) = setup_with_quotas!(calls_and_bytes);
+    let calls = Symbol::new(&env, CALLS);
+    let provider = client.get_subscription(&subscription_id).provider;
+    let subscriber_before = token_balance(&client, &accounts.user1);
+    let provider_before = token_balance(&client, &provider);
+
+    let mut collected = 0_i128;
+    for period in 0..3_u64 {
+        client.record_usage(&subscription_id, &calls, &11_001);
+        env.ledger().set_timestamp(START + PERIOD * (period + 1));
+        collected += client.charge(&subscription_id);
+    }
+
+    // Conservation: everything the subscriber paid, the provider received.
+    assert_eq!(collected, 3 * (AMOUNT + 50));
+    assert_eq!(
+        token_balance(&client, &accounts.user1),
+        subscriber_before - collected
+    );
+    assert_eq!(
+        token_balance(&client, &provider),
+        provider_before + collected
+    );
+}
+
+#[test]
+fn zero_balance_subscription_charge_moves_to_past_due_without_moving_funds() {
+    let (env, token, _tc, client, accounts, _subscription_id) = setup!();
+    // A subscriber with no tokens at all: even the base cannot be collected.
+    let broke = Address::generate(&env);
+    let broke_id = client.subscribe(&broke, &accounts.validator, &token, &AMOUNT, &PERIOD);
+    let subscription_before = client.get_subscription(&broke_id);
+    let provider = subscription_before.provider.clone();
+    let provider_before = token_balance(&client, &provider);
+
+    env.ledger().set_timestamp(START + PERIOD);
+    assert_eq!(client.charge(&broke_id), 0);
+
+    // No funds moved in either direction.
+    assert_eq!(token_balance(&client, &broke), 0);
+    assert_eq!(token_balance(&client, &provider), provider_before);
+    // The failed attempt is recorded as the documented arrears-retry state.
+    let subscription_after = client.get_subscription(&broke_id);
+    assert_eq!(subscription_after.status, SubscriptionStatus::PastDue);
+    assert_eq!(subscription_after.failed_attempts, 1);
+    assert_eq!(
+        subscription_after.last_charged,
+        subscription_before.last_charged
+    );
 }
 
 /// Every event this contract published under `name` in the latest invocation,

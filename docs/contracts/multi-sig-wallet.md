@@ -4,32 +4,56 @@ Multi-owner wallet with configurable approval threshold and transaction queue.
 
 - **Source:** `crates/multi-sig-wallet`
 - **Client:** `SorobanForgeMultiSigWalletClient` (generated)
-- **Related:** [Contract index](./index.md), [Feature Status Matrix](../FEATURE-STATUS.md), [Known Limitations](../KNOWN-LIMITATIONS.md), [DAO Governance](./dao-governance.md)
+- -**Related:** [Contract index](./index.md), [Feature Status Matrix](../FEATURE-STATUS.md), [Known Limitations](../KNOWN-LIMITATIONS.md), [DAO Governance](./dao-governance.md)
 
 ## Interface
 
 ```rust
 fn initialize(owners: Vec<Address>, threshold: u32) -> Result<(), ForgeError>
-fn submit(proposer, target, function_name, args) -> Result<u64, ForgeError>
-fn confirm(tx_id, signer) -> Result<(), ForgeError>
-fn reject(tx_id, signer) -> Result<(), ForgeError>
-fn execute(tx_id) -> Result<(), ForgeError>
-fn get_transaction(tx_id) -> Result<Transaction, ForgeError>
-fn add_owner(owner) -> Result<(), ForgeError>
-fn remove_owner(owner) -> Result<(), ForgeError>
-fn update_threshold(new_threshold) -> Result<(), ForgeError>
+fn submit(submitter: Address, target: Address, payload: Bytes, expiry: Option<u64>) -> Result<u64, ForgeError>
+fn submit_call(submitter: Address, target: Address, fn_name: Symbol, args: Vec<Val>, expiry: Option<u64>) -> Result<u64, ForgeError>
+fn confirm(tx_id: u64, signer: Address) -> Result<(), ForgeError>
+fn reject(tx_id: u64, signer: Address) -> Result<(), ForgeError>
+fn execute(tx_id: u64) -> Result<(), ForgeError>
+fn get_tx(tx_id: u64) -> Result<WalletTx, ForgeError>
+fn is_live(tx_id: u64) -> bool
+fn is_tx_live(tx_id: u64) -> bool
+fn add_owner(proposer: Address, new_owner: Address) -> Result<u64, ForgeError>
+fn remove_owner(proposer: Address, owner: Address) -> Result<u64, ForgeError>
+fn set_threshold(proposer: Address, new_threshold: u32) -> Result<u64, ForgeError>
 ```
 
 The wallet is configured **once** via `initialize(owners, threshold)`
 (first caller wins; re-initialisation is rejected). `submit` records a
-`target` contract and an opaque payload; `confirm` collects approvals until
+`target` contract and an opaque payload with an optional `expiry` timestamp (`None` for immortal transactions); `submit_call` does the same for typed contract invocations. `confirm` collects approvals until
 the threshold is reached; `execute` then performs a real cross-contract
 invocation to the recorded target (an opaque `TxKind::Data` tx) or moves
 real tokens (a typed `TxKind::Withdrawal` tx). A target revert surfaces as
 `ForgeError::ContractInvocationFailed` and leaves the tx `Pending` and
-retryable. `reject` records a formal objection; any rejection blocks
+retryable. Any owner may `reject` a pending tx; one rejection immediately
+makes it `Rejected` and terminal. The rejector and any existing confirmations
+remain on the record for audit, and `get_tx` continues to expose it.
+Confirming, rejecting, or executing a rejected transaction returns
+`ForgeError::InvalidInput` without changing the record.
+`ForgeError::ContractInvocationFailed` and leaves the tx `Pending` and retryable. `reject` records a formal objection; any rejection blocks
 execution, and reaching the rejection threshold makes the tx `Rejected`
-(terminal).
+(terminal). If a transaction expires before meeting threshold, its status transitions lazily to `Expired` and further confirmations are refused.
+
+## Transaction metadata
+
+Transactions carry optional metadata for treasury context (accounting
+references, human-readable descriptions, off-chain documentation links):
+
+- `memo: String` - optional short human-readable description, max 128 chars.
+- `metadata: String` - optional extended information blob, max 512 chars.
+
+Both fields are stored on the transaction record at submission time and
+preserved through the transaction lifecycle (`Pending` -> `Executed` /
+`Rejected`). They are returned by `get_tx` and the queue views. Submission
+rejects over-length values with `ForgeError::InvalidInput`. Metadata is not
+encrypted and no on-chain document storage is performed; use external
+IPFS/URLs for large payloads. The `submit` event includes a metadata hash
+for verification.
 
 ## Transaction query views
 
@@ -102,14 +126,36 @@ recorded balance.
 
 - `Pending` — Awaiting approvals
 - `Executed` — Threshold met and the transaction completed
-- `Rejected` — Rejection threshold met; terminal
+- `Rejected` — Vetoed by an owner; terminal; rejector and existing confirmations retained
+- `Pending` — Awaiting approvals; liveness view `is_live(tx_id)` reads `true`.
+- `Executed` — Threshold met and the transaction completed (terminal).
+- `Rejected` — Rejection threshold met (terminal).
+- `Expired` — Expiry deadline reached before meeting approval threshold; evaluated lazily on read/access without requiring an external keeper.
 
-## Storage & TTL Maintenance
+### Transaction Lifecycle and Expiry Semantics
+
+Transactions can optionally specify an `expiry: Option<u64>` (ledger timestamp) upon submission (`None` preserves immortal behavior):
+- **Submission validation**: Submitting with `expiry <= env.ledger().timestamp()` is rejected with `ForgeError::DeadlineReached`.
+- **Lazy evaluation**: When accessing a transaction (`get_tx`, `is_live`, etc.), if `now >= expiry` and confirmations have not reached `threshold`, the transaction status surfaces lazily as `TxStatus::Expired`.
+- **Liveness commitment**: A transaction that reaches the confirmation threshold *before* its expiry deadline remains executable even after the deadline passes (`execute` succeeds; status remains `Pending` until execution completes).
+- **Boundary-pinned confirmation**: Approvals (`confirm`) attempted at or after the expiry deadline (`now >= expiry`) are rejected with `ForgeError::DeadlineReached`, leaving the transaction's confirmation set unchanged.
+- **Terminal guard**: `execute` and `reject` calls on an expired transaction fail with `ForgeError::DeadlineReached`.
+- **Queue query**: `get_transactions_by_status(TxStatus::Expired, ...)` paginates expired transactions seamlessly.
+
+| State Transition | Before Expiry | At Expiry Boundary (`now == expiry`) | After Expiry (`now > expiry`) |
+|---|---|---|---|
+| `Pending` (below threshold) | `Pending`, `is_live == true` | `Expired`, `is_live == false` | `Expired`, `is_live == false` |
+| `confirm` | Succeeds, records approval | Fails (`DeadlineReached`) | Fails (`DeadlineReached`) |
+| `execute` (below threshold) | Fails (`InvalidInput`) | Fails (`DeadlineReached`) | Fails (`DeadlineReached`) |
+| `Pending` (threshold met before expiry) | `Pending`, executable | `Pending`, executable | `Pending`, executable |
+| `execute` (threshold met before expiry) | Succeeds -> `Executed` | Succeeds -> `Executed` | Succeeds -> `Executed` |
+
+## Storage & TWL Maintenance
 
 Transaction records (`DataKey::Tx(u64)`) are stored in **persistent
 storage**: `submit`, `confirm`, `reject`, `execute`, `submit_withdrawal`,
 and the limit-change paths write through `.persistent()` and bump the
-entry's TTL to a 30-day horizon on every write. `get_tx` reads from
+entry's TWL to a 30-day horizon on every write. `get_tx` reads from
 persistent storage. Owners, threshold, per-token balances, and withdrawal
 limits remain in instance storage.
 
@@ -117,3 +163,5 @@ A permissionless public keeper entrypoint `touch_tx_ttl(tx_id)` allows
 anyone to bump a transaction's persistent TTL without modifying its state;
 an unknown `tx_id` returns `ForgeError::NotFound`. A separate
 `touch_ttl(token)` keeper extends the persistent balance entries' TTL.
+
+<div id="task-247"></div>

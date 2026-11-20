@@ -9,13 +9,17 @@
 //! soroban-forge verify --wasm path/to/contract.wasm
 //! soroban-forge verify --expected <sha256>
 //! soroban-forge verify --manifest provenance-manifest.json
+//! soroban-forge doctor --wasm target/wasm32v1-none/release/contract.wasm
 //! ```
 
 mod cli;
 mod commands;
 
 use clap::{Parser, Subcommand};
-use cli::{BuildArgs, DeployArgs, EventsArgs, InvokeArgs, LintArgs, NewArgs, TestArgs, VerifyArgs};
+use cli::{
+    BuildArgs, DeployArgs, DoctorArgs, EventsArgs, InspectArgs, InvokeArgs, LintArgs, NewArgs,
+    ScaffoldValidateArgs, TestArgs, VerifyArgs,
+};
 
 #[derive(Parser, Debug)]
 #[command(
@@ -36,9 +40,12 @@ pub enum Commands {
     Test(TestArgs),
     Deploy(DeployArgs),
     New(NewArgs),
+    ScaffoldValidate(ScaffoldValidateArgs),
     Verify(VerifyArgs),
     Invoke(InvokeArgs),
     Events(EventsArgs),
+    Inspect(InspectArgs),
+    Doctor(DoctorArgs),
 }
 
 fn main() -> anyhow::Result<()> {
@@ -51,9 +58,12 @@ fn main() -> anyhow::Result<()> {
         Commands::Test(args) => commands::test::run(args)?,
         Commands::Deploy(args) => commands::deploy::run(args)?,
         Commands::New(args) => commands::new::run(args)?,
+        Commands::ScaffoldValidate(args) => commands::scaffold_validate::run(args)?,
         Commands::Verify(args) => commands::verify::run(args)?,
         Commands::Invoke(args) => commands::invoke::run(args)?,
         Commands::Events(args) => commands::events::run(args)?,
+        Commands::Inspect(args) => commands::inspect::run(args)?,
+        Commands::Doctor(args) => commands::doctor::run(args)?,
     }
 
     Ok(())
@@ -139,5 +149,23 @@ mod tests {
         assert!(help.contains("--wasm"));
         assert!(help.contains("--expected"));
         assert!(help.contains("--manifest"));
+    }
+
+    #[test]
+    fn scaffold_validate_accepts_a_contract_path() {
+        let cli = Cli::try_parse_from([
+            "soroban-forge",
+            "scaffold-validate",
+            "crates/example-contract",
+        ])
+        .unwrap();
+
+        let Commands::ScaffoldValidate(args) = cli.command else {
+            panic!("expected scaffold-validate command");
+        };
+        assert_eq!(
+            args.path,
+            std::path::PathBuf::from("crates/example-contract")
+        );
     }
 }

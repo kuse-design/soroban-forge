@@ -380,6 +380,116 @@ fn generate() -> serde_json::Value {
     })
 }
 
+/// Stable local-test form of the escrow contract's raw RPC-shaped fixture.
+///
+/// This keeps the event name decoded from topic 0 and the ledger, event index,
+/// and transaction hash used to order events. Token events are excluded by
+/// matching the fixture's escrow contract id.
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct NormalizedEscrowEvent {
+    event_name: String,
+    ledger: u64,
+    event_index: u64,
+    transaction_hash: String,
+}
+
+/// Normalize one escrow fixture into its stable, documented local-test shape.
+fn normalize_escrow_events(
+    fixture: &serde_json::Value,
+) -> Result<Vec<NormalizedEscrowEvent>, String> {
+    let escrow_id = fixture
+        .get("contract")
+        .and_then(|contract| contract.get("id"))
+        .and_then(serde_json::Value::as_str)
+        .ok_or_else(|| String::from("fixture contract id is missing"))?;
+    let events = fixture
+        .get("events")
+        .and_then(serde_json::Value::as_array)
+        .ok_or_else(|| String::from("fixture events must be an array"))?;
+    let mut normalized = Vec::new();
+
+    for event in events {
+        let contract_id = event
+            .get("contractId")
+            .and_then(serde_json::Value::as_str)
+            .ok_or_else(|| String::from("event contract id is missing"))?;
+        if contract_id != escrow_id {
+            continue;
+        }
+
+        let topic0 = event
+            .get("topic")
+            .and_then(serde_json::Value::as_array)
+            .and_then(|topics| topics.first())
+            .and_then(serde_json::Value::as_str)
+            .ok_or_else(|| String::from("escrow event topic 0 is missing"))?;
+        let topic = xdr::ScVal::from_xdr_base64(topic0, XDR_LIMITS)
+            .map_err(|_| String::from("escrow event topic 0 is invalid XDR"))?;
+        let xdr::ScVal::Symbol(symbol) = topic else {
+            return Err(String::from("escrow event topic 0 must be a symbol"));
+        };
+        let event_name = symbol
+            .to_utf8_string()
+            .map_err(|_| String::from("escrow event name is not valid UTF-8"))?;
+        let ledger = event
+            .get("ledger")
+            .and_then(serde_json::Value::as_u64)
+            .ok_or_else(|| String::from("escrow event ledger is missing"))?;
+        let event_index = event
+            .get("eventIndex")
+            .and_then(serde_json::Value::as_u64)
+            .ok_or_else(|| String::from("escrow event index is missing"))?;
+        let transaction_hash = event
+            .get("transactionHash")
+            .and_then(serde_json::Value::as_str)
+            .ok_or_else(|| String::from("escrow event transaction hash is missing"))?
+            .to_string();
+
+        normalized.push(NormalizedEscrowEvent {
+            event_name,
+            ledger,
+            event_index,
+            transaction_hash,
+        });
+    }
+
+    Ok(normalized)
+}
+
+/// A fixture-level guard complements byte-identical regeneration by making
+/// the canonical create/deposit/dispute/resolve lifecycle explicit.
+#[test]
+fn escrow_fixture_preserves_canonical_lifecycle_event_order() {
+    let fixture = build_fixture();
+    let events = normalize_escrow_events(&fixture).expect("generated fixture is valid");
+    let canonical: Vec<_> = events
+        .iter()
+        .filter(|event| event.transaction_hash.starts_with("000000000000100"))
+        .map(|event| (event.event_name.as_str(), event.ledger, event.event_index))
+        .collect();
+
+    assert_eq!(
+        canonical,
+        std::vec![
+            ("escrow_created", 1001, 0),
+            ("deposited", 1002, 1),
+            ("disputed", 1003, 0),
+            ("resolved", 1004, 1),
+        ]
+    );
+}
+
+/// The normalized fixture representation is deterministic for repeated reads.
+#[test]
+fn escrow_fixture_normalization_is_deterministic() {
+    let first_fixture = build_fixture();
+    let second_fixture = build_fixture();
+    let first = normalize_escrow_events(&first_fixture).expect("generated fixture is valid");
+    let second = normalize_escrow_events(&second_fixture).expect("generated fixture is valid");
+
+    assert_eq!(first, second);
+}
+
 /// Verify the fixture is stable across two generations, covers the complete
 /// lifecycle surface, and matches the committed file.
 #[test]

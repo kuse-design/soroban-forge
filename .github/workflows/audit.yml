@@ -19,7 +19,8 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
           allow-low: true
           deny-warnings: false
-          # No ignores: the RUSTSEC-2026-0009 (`time`) advisory was cleared
-          # by updating `time` to 0.3.47 in the lockfile after the SDK 27
-          # migration. Warnings (e.g. transitive `paste` unmaintained) do
-          # not fail this job while `deny-warnings` is false.
+          # RUSTSEC-2026-0387 (transitive crypto-bigint 0.5.5, no patched
+          # 0.5.x) is ignored until soroban-sdk moves to elliptic-curve 0.14;
+          # see .cargo/audit.toml. Warnings (e.g. transitive `paste`
+          # unmaintained) do not fail this job while `deny-warnings` is false.
+          ignore: RUSTSEC-2026-0387

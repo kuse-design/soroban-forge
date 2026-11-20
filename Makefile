@@ -1,4 +1,4 @@
-.PHONY: build test format lint audit clean doc release deploy-staging deploy-prod
+.PHONY: build test format lint audit hygiene clean doc release deploy-staging deploy-prod
 
 SHELL := /bin/bash
 
@@ -30,6 +30,9 @@ lint:
 
 audit:
 	cargo audit
+
+hygiene:
+	bash scripts/check-repo-hygiene.sh
 
 doc:
 	cargo doc --workspace --no-deps --open

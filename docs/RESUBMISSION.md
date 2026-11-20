@@ -63,7 +63,7 @@ stays — it is the strongest contributor asset in the repo.
 | Honesty docs | `KNOWN-LIMITATIONS.md` and `FEATURE-STATUS.md` updated to the new state |
 
 **Explicitly out of Phase 1:** the other five contracts' settlement work,
-weighted voting, plan management, multi-recipient royalties, audit.
+plan management, multi-recipient royalties, audit.
 
 ## Phase 2 — Proof (≈1 week)
 

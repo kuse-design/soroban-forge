@@ -98,6 +98,41 @@ fn subscribe_rejects_signature_from_non_subscriber() {
 }
 
 #[test]
+fn deposit_rejects_signature_from_non_subscriber() {
+    let (env, _token, contract_id, client, accounts) = setup!();
+    let id = client.subscribe(&accounts.user1, &accounts.user2, &_token, &AMOUNT, &PERIOD);
+    let wrong_signer = &accounts.user2;
+    env.mock_auths(&[MockAuth {
+        address: wrong_signer,
+        invoke: &MockAuthInvoke {
+            contract: &contract_id,
+            fn_name: "deposit",
+            args: (&id, AMOUNT).into_val(&env),
+            sub_invokes: &[],
+        },
+    }]);
+    assert_auth_abort!(client.try_deposit(&id, &AMOUNT));
+}
+
+#[test]
+fn withdraw_balance_rejects_signature_from_non_subscriber() {
+    let (env, token, contract_id, client, accounts) = setup!();
+    let id = client.subscribe(&accounts.user1, &accounts.user2, &token, &AMOUNT, &PERIOD);
+    client.deposit(&id, &AMOUNT);
+    let wrong_signer = &accounts.user2;
+    env.mock_auths(&[MockAuth {
+        address: wrong_signer,
+        invoke: &MockAuthInvoke {
+            contract: &contract_id,
+            fn_name: "withdraw_balance",
+            args: (&id, AMOUNT).into_val(&env),
+            sub_invokes: &[],
+        },
+    }]);
+    assert_auth_abort!(client.try_withdraw_balance(&id, &AMOUNT));
+}
+
+#[test]
 fn charge_accepts_provider_signature_with_subscriber_token_auth() {
     let (env, token, contract_id, client, accounts) = setup!();
     let subscriber = &accounts.user1;

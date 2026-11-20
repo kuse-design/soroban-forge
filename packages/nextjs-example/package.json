@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "eslint . --max-warnings=0",
+    "test": "tsc --project tsconfig.test.json && node --test dist-test/tests/*.test.js"
   },
   "dependencies": {
     "@soroban-forge/escrow-client": "file:../typescript-sdk",
@@ -18,7 +19,7 @@
     "@types/node": "^26",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
-    "eslint": "^10",
+    "eslint": "^9.39.5",
     "eslint-config-next": "16.3.5",
     "typescript": "^5.8.3"
   }

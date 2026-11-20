@@ -26,6 +26,8 @@ By participating, you agree to uphold our Code of Conduct. Be respectful, inclus
 - Report confidentially via the repository's Security tab (GitHub private
   vulnerability reporting / Security Advisories).
 - See [SECURITY.md](SECURITY.md) for details.
+- PRs that add editor configs, font/binary files or npm lifecycle scripts are
+  rejected by CI (`make hygiene`); see "Repository Hygiene" in SECURITY.md.
 
 ## Development Setup
 

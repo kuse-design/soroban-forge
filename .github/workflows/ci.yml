@@ -2,11 +2,24 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, integration]
   pull_request:
-    branches: [main]
+    branches: [main, integration]
+
+permissions:
+  contents: read
 
 jobs:
+  repo-hygiene:
+    name: Repo Hygiene
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Block auto-run configs, binary payloads and npm lifecycle hooks
+        run: bash scripts/check-repo-hygiene.sh
+      - name: ForgeGuard scanner regression tests
+        run: bash scripts/forgeguard/test-scan.sh
+
   rustfmt:
     name: Rustfmt
     runs-on: ubuntu-latest
@@ -64,6 +77,8 @@ jobs:
       - uses: rustsec/audit-check@v2
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
+          # See .cargo/audit.toml for why this advisory is ignored.
+          ignore: RUSTSEC-2026-0387
 
   dependency-policy:
     name: Dependency Policy
@@ -88,18 +103,26 @@ jobs:
         with:
           targets: wasm32v1-none
       - uses: Swatinem/rust-cache@v2
-      # Build only the contract crates for the WASM target; shared/test-utils
-      # are not deployable artifacts. NOTE: keep this list in sync with the
-      # contract crates added to the workspace.
+      - name: Install stellar-cli
+        # Pinned prebuilt binary: unpinned `cargo install` compiles for ~10
+        # minutes and tracks latest (28.1.0 needs libdbus, absent on runners).
+        # 28.0.0 matches the locally verified build toolchain.
+        run: |
+          mkdir -p "$HOME/.local/bin"
+          curl --proto '=https' --tlsv1.2 -sSfL \
+            https://github.com/stellar/stellar-cli/releases/download/v28.0.0/stellar-cli-28.0.0-x86_64-unknown-linux-gnu.tar.gz \
+            | tar -xz -C "$HOME/.local/bin"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          "$HOME/.local/bin/stellar" --version
+      # soroban-sdk 28 requires a spec-shaking build system (stellar-cli
+      # 25.2+); plain `cargo build --target wasm32v1-none` is rejected by the
+      # SDK build script. Build only the contract crates for the WASM target;
+      # shared/test-utils are not deployable artifacts. NOTE: keep this list
+      # in sync with the contract crates added to the workspace.
       - name: Build contract WASM artifacts
         run: |
-          cargo build --locked --release --target wasm32v1-none \
-            --package soroban-forge-escrow \
-            --package soroban-forge-vesting \
-            --package soroban-forge-multi-sig-wallet \
-            --package soroban-forge-dao-governance \
-            --package soroban-forge-subscription-payments \
-            --package soroban-forge-marketplace-royalties
+          # The workspace's cdylib crates are exactly the contract crates.
+          stellar contract build --locked --profile release --optimize=false
       - name: Report WASM artifact sizes
         run: |
           shopt -s nullglob
@@ -147,7 +170,7 @@ jobs:
           cache: "npm"
           cache-dependency-path: packages/typescript-sdk/package-lock.json
       - name: Install dependencies
-        run: npm ci
+        run: npm ci --ignore-scripts
         working-directory: packages/typescript-sdk
       - name: Run offline tests
         run: npm test
@@ -169,6 +192,17 @@ jobs:
         with:
           targets: wasm32v1-none
       - uses: Swatinem/rust-cache@v2
+      - name: Install stellar-cli
+        # Pinned prebuilt binary: unpinned `cargo install` compiles for ~10
+        # minutes and tracks latest (28.1.0 needs libdbus, absent on runners).
+        # 28.0.0 matches the locally verified build toolchain.
+        run: |
+          mkdir -p "$HOME/.local/bin"
+          curl --proto '=https' --tlsv1.2 -sSfL \
+            https://github.com/stellar/stellar-cli/releases/download/v28.0.0/stellar-cli-28.0.0-x86_64-unknown-linux-gnu.tar.gz \
+            | tar -xz -C "$HOME/.local/bin"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          "$HOME/.local/bin/stellar" --version
       - name: Build artifacts and generate manifest
         run: scripts/provenance.sh build
       - name: Verify artifacts reproduce from a clean build

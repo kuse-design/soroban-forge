@@ -24,6 +24,7 @@ import type {
 export * from "@stellar/stellar-sdk";
 export * as contract from "@stellar/stellar-sdk/contract";
 export * as rpc from "@stellar/stellar-sdk/rpc";
+export * from "./clients/index.js";
 
 if (typeof window !== "undefined") {
   //@ts-ignore Buffer exists
@@ -266,7 +267,20 @@ export const ForgeError = {
    * (a valid withdrawal that is too large right now) from a malformed
    * argument.
    */
-  13: {message:"WithdrawalLimitExceeded"}
+  13: {message:"WithdrawalLimitExceeded"},
+  /**
+   * A subscription is in the `PastDue` lapsed state and the requested
+   * operation cannot be performed until a catch-up charge restores it to
+   * `Active`. Kept distinct from [`ForgeError::DeadlineReached`] so a caller
+   * can tell a lapsed billing state from an argument that was merely
+   * too early.
+   */
+  14: {message:"SubscriptionPastDue"},
+  /**
+   * A proposer has reached the maximum allowed concurrent active proposals
+   * or is within the proposer cooldown window.
+   */
+  15: {message:"ProposerCooldown"}
 }
 
 

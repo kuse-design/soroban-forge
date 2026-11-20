@@ -1,3 +1,11 @@
+//! Test-only contracts for cross-contract dispatch tests.
+//!
+//! Use [`MockTarget`] when a test needs a successful `execute(Bytes)` target,
+//! payload recording, or deterministic revert control, including failure on a
+//! selected successful-call ordinal. Use a token fixture for SEP-41 behavior;
+//! these targets intentionally do not model token balances or production
+//! authorization.
+
 use soroban_sdk::testutils::Address as _;
 use soroban_sdk::{contracttype, Address, Env, Vec};
 
@@ -59,6 +67,8 @@ pub struct MockTarget;
 pub enum MockTargetKey {
     Count,
     LastPayload,
+    Revert,
+    FailAt,
 }
 
 #[soroban_sdk::contractimpl]
@@ -70,12 +80,46 @@ impl MockTarget {
             .instance()
             .get(&MockTargetKey::Count)
             .unwrap_or(0);
+        if env
+            .storage()
+            .instance()
+            .get(&MockTargetKey::Revert)
+            .unwrap_or(false)
+        {
+            panic!("mock target reverted");
+        }
+        let fail_at: u32 = env
+            .storage()
+            .instance()
+            .get(&MockTargetKey::FailAt)
+            .unwrap_or(0);
+        let next_call = count.saturating_add(1);
+        if fail_at != 0 && fail_at == next_call {
+            panic!("mock target failed at configured call {fail_at}");
+        }
         env.storage()
             .instance()
-            .set(&MockTargetKey::Count, &(count + 1));
+            .set(&MockTargetKey::Count, &next_call);
         env.storage()
             .instance()
             .set(&MockTargetKey::LastPayload, &payload);
+    }
+
+    /// Make subsequent `execute` calls revert when enabled.
+    pub fn set_revert(env: Env, revert: bool) {
+        env.storage()
+            .instance()
+            .set(&MockTargetKey::Revert, &revert);
+    }
+
+    /// Fail when `execute` reaches the configured one-based successful-call
+    /// ordinal. Pass `0` to disable the failure point. Since a reverted call
+    /// does not advance the successful-call count, the failure remains armed
+    /// until it is cleared or moved.
+    pub fn set_fail_at(env: Env, call_number: u32) {
+        env.storage()
+            .instance()
+            .set(&MockTargetKey::FailAt, &call_number);
     }
 
     /// Read the number of times `execute` was called.
@@ -101,5 +145,103 @@ impl RevertingTarget {
     /// Panics on invocation, simulating a target revert.
     pub fn execute(_env: Env, _payload: soroban_sdk::Bytes) {
         panic!("target reverted");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{MockTarget, MockTargetClient};
+    use soroban_sdk::{Bytes, Env};
+
+    #[test]
+    fn target_succeeds_by_default_and_records_payload() {
+        let env = Env::default();
+        let target = env.register(MockTarget, ());
+        let client = MockTargetClient::new(&env, &target);
+        let payload = Bytes::from_slice(&env, b"first");
+
+        client.execute(&payload);
+
+        assert_eq!(client.count(), 1);
+        assert_eq!(client.last_payload(), Some(payload));
+    }
+
+    #[test]
+    fn forced_revert_is_controllable_and_does_not_record_failed_payload() {
+        let env = Env::default();
+        let target = env.register(MockTarget, ());
+        let client = MockTargetClient::new(&env, &target);
+        client.set_revert(&true);
+
+        assert!(client
+            .try_execute(&Bytes::from_slice(&env, b"revert"))
+            .is_err());
+        assert_eq!(client.count(), 0);
+        assert_eq!(client.last_payload(), None);
+
+        client.set_revert(&false);
+        client.execute(&Bytes::from_slice(&env, b"success"));
+        assert_eq!(client.count(), 1);
+    }
+
+    #[test]
+    fn configured_failure_point_is_reproducible_and_can_be_cleared() {
+        let env = Env::default();
+        let target = env.register(MockTarget, ());
+        let client = MockTargetClient::new(&env, &target);
+        client.execute(&Bytes::from_slice(&env, b"first"));
+        client.execute(&Bytes::from_slice(&env, b"second"));
+        client.set_fail_at(&3);
+
+        let third = Bytes::from_slice(&env, b"third");
+        assert!(client.try_execute(&third).is_err());
+        assert!(client.try_execute(&third).is_err());
+        assert_eq!(client.count(), 2);
+        assert_eq!(
+            client.last_payload(),
+            Some(Bytes::from_slice(&env, b"second"))
+        );
+
+        client.set_fail_at(&0);
+        client.execute(&third);
+        assert_eq!(client.count(), 3);
+        assert_eq!(client.last_payload(), Some(third));
+    }
+
+    #[test]
+    fn records_the_most_recent_payload_across_multiple_calls() {
+        let env = Env::default();
+        let target = env.register(MockTarget, ());
+        let client = MockTargetClient::new(&env, &target);
+        let first = Bytes::from_slice(&env, b"first");
+        let second = Bytes::from_slice(&env, b"second");
+
+        client.execute(&first);
+        client.execute(&second);
+
+        assert_eq!(client.count(), 2);
+        assert_eq!(client.last_payload(), Some(second));
+    }
+
+    #[test]
+    fn instances_keep_revert_state_and_payloads_independent() {
+        let env = Env::default();
+        let first = env.register(MockTarget, ());
+        let second = env.register(MockTarget, ());
+        let first_client = MockTargetClient::new(&env, &first);
+        let second_client = MockTargetClient::new(&env, &second);
+        first_client.set_revert(&true);
+
+        assert!(first_client
+            .try_execute(&Bytes::from_slice(&env, b"blocked"))
+            .is_err());
+        second_client.execute(&Bytes::from_slice(&env, b"allowed"));
+
+        assert_eq!(first_client.count(), 0);
+        assert_eq!(second_client.count(), 1);
+        assert_eq!(
+            second_client.last_payload(),
+            Some(Bytes::from_slice(&env, b"allowed"))
+        );
     }
 }

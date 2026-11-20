@@ -22,13 +22,18 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { StrKey } from "@stellar/stellar-sdk";
-
 // --- imports from the generated client ----------------------------------------
 import {
   Client,
   networks,
   ForgeError,
   contract,
+  escrow,
+  vesting,
+  multisig,
+  dao,
+  subscription,
+  marketplace,
 } from "../../dist/index.js";
 
 // Type-only imports: validated by the TypeScript compiler; they do not
@@ -78,6 +83,19 @@ test("Client can be constructed with testnet network config", () => {
     client instanceof Client,
     "constructed value should be a Client instance",
   );
+});
+
+test("unified SDK exports all six generated contract clients", () => {
+  for (const clientModule of [
+    escrow,
+    vesting,
+    multisig,
+    dao,
+    subscription,
+    marketplace,
+  ]) {
+    assert.equal(typeof clientModule.Client, "function");
+  }
 });
 
 test("networks.testnet carries the expected contract ID", () => {
@@ -374,9 +392,9 @@ test("ForgeError is exported as a runtime object", () => {
   assert.ok(!Array.isArray(ForgeError));
 });
 
-test("ForgeError exposes 13 error codes (1–13)", () => {
+test("ForgeError exposes 15 error codes (1–15)", () => {
   const codes = Object.keys(ForgeError).map(Number).sort((a, b) => a - b);
-  assert.deepEqual(codes, [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]);
+  assert.deepEqual(codes, [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]);
 });
 
 const EXPECTED_FORGE_ERRORS: Record<number, string> = {
@@ -393,6 +411,8 @@ const EXPECTED_FORGE_ERRORS: Record<number, string> = {
   11: "TokenTransferFailed",
   12: "ContractInvocationFailed",
   13: "WithdrawalLimitExceeded",
+  14: "SubscriptionPastDue",
+  15: "ProposerCooldown",
 };
 
 test("ForgeError messages match the documented error surface", () => {

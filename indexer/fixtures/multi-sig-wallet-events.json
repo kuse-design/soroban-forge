@@ -1,0 +1,78 @@
+{
+  "contract": {
+    "id": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
+    "name": "soroban-forge-multi-sig-wallet"
+  },
+  "description": "Deterministic submit/confirm/execute events from the Soroban Forge multi-signature wallet.",
+  "events": [
+    {
+      "contractId": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
+      "eventIndex": 0,
+      "id": "0-0",
+      "inSuccessfulContractCall": true,
+      "ledger": 0,
+      "ledgerClosedAt": "2026-09-23T00:00:00.000Z",
+      "operationIndex": 0,
+      "pagingToken": "0-0",
+      "topic": [
+        "AAAADwAAAAx0eF9zdWJtaXR0ZWQ=",
+        "AAAABQAAAAAAAAAB"
+      ],
+      "transactionHash": "0000000000000000000000000000000000000000000000000000000000000000",
+      "type": "contract",
+      "value": "AAAAEQAAAAEAAAACAAAADwAAAAtwYXlsb2FkX2xlbgAAAAADAAAABwAAAA8AAAAJc3VibWl0dGVyAAAAAAAAEgAAAAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAw=="
+    },
+    {
+      "contractId": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
+      "eventIndex": 0,
+      "id": "0-0",
+      "inSuccessfulContractCall": true,
+      "ledger": 0,
+      "ledgerClosedAt": "2026-09-23T00:00:00.000Z",
+      "operationIndex": 0,
+      "pagingToken": "0-0",
+      "topic": [
+        "AAAADwAAAAx0eF9jb25maXJtZWQ=",
+        "AAAABQAAAAAAAAAB"
+      ],
+      "transactionHash": "0000000000000000000000000000000000000000000000000000000000000000",
+      "type": "contract",
+      "value": "AAAAEQAAAAEAAAACAAAADwAAABNjb25maXJtYXRpb25zX2NvdW50AAAAAAMAAAABAAAADwAAAAZzaWduZXIAAAAAABIAAAABAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAQ="
+    },
+    {
+      "contractId": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
+      "eventIndex": 0,
+      "id": "0-0",
+      "inSuccessfulContractCall": true,
+      "ledger": 0,
+      "ledgerClosedAt": "2026-09-23T00:00:00.000Z",
+      "operationIndex": 0,
+      "pagingToken": "0-0",
+      "topic": [
+        "AAAADwAAAAx0eF9jb25maXJtZWQ=",
+        "AAAABQAAAAAAAAAB"
+      ],
+      "transactionHash": "0000000000000000000000000000000000000000000000000000000000000000",
+      "type": "contract",
+      "value": "AAAAEQAAAAEAAAACAAAADwAAABNjb25maXJtYXRpb25zX2NvdW50AAAAAAMAAAACAAAADwAAAAZzaWduZXIAAAAAABIAAAABAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAM="
+    },
+    {
+      "contractId": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
+      "eventIndex": 0,
+      "id": "0-0",
+      "inSuccessfulContractCall": true,
+      "ledger": 0,
+      "ledgerClosedAt": "2026-09-23T00:00:00.000Z",
+      "operationIndex": 0,
+      "pagingToken": "0-0",
+      "topic": [
+        "AAAADwAAAAt0eF9leGVjdXRlZAA=",
+        "AAAABQAAAAAAAAAB"
+      ],
+      "transactionHash": "0000000000000000000000000000000000000000000000000000000000000000",
+      "type": "contract",
+      "value": "AAAAEQAAAAEAAAACAAAADwAAABNjb25maXJtYXRpb25zX2NvdW50AAAAAAMAAAACAAAADwAAAAl0aHJlc2hvbGQAAAAAAAADAAAAAg=="
+    }
+  ],
+  "schema": 1
+}
